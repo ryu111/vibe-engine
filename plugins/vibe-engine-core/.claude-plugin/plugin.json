@@ -1,0 +1,17 @@
+{
+  "name": "vibe-engine-core",
+  "version": "0.1.0",
+  "description": "Vibe Engine 核心模組 - 多代理協調、任務分解、驗證協議",
+  "author": {
+    "name": "Vibe Engine Team"
+  },
+  "repository": "https://github.com/user/vibe-engine",
+  "license": "MIT",
+  "keywords": [
+    "vibe-engineering",
+    "multi-agent",
+    "orchestration",
+    "verification",
+    "task-decomposition"
+  ]
+}

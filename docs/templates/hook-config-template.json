@@ -1,0 +1,151 @@
+{
+  "_comment": "Hook 配置模板 - 複製到 hooks/hooks.json",
+  "_note": "刪除所有 _comment 和 _note 欄位後使用",
+  "_important": "所有 command hooks 使用 Node.js 確保跨平台相容性",
+
+  "description": "Plugin hooks description",
+  "hooks": {
+    "_comment_PreToolUse": "工具執行前觸發，可阻擋或修改操作",
+    "PreToolUse": [
+      {
+        "_comment": "Prompt-based hook 範例（推薦用於複雜邏輯）",
+        "matcher": "Edit|Write|Bash",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "檢查操作是否安全。回覆 JSON: {\"decision\": \"allow|deny\", \"reason\": \"...\"}",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "_comment": "Command hook 範例（用於快速確定性檢查）- 使用 Node.js",
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check-something.js\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+
+    "_comment_PostToolUse": "工具執行後觸發，用於記錄或後處理",
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/log-operation.js\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+
+    "_comment_Stop": "Agent 準備停止時觸發，可阻擋或執行收尾工作",
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "驗證任務是否完成。回覆 JSON: {\"decision\": \"approve|block\", \"reason\": \"...\"}",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+
+    "_comment_SubagentStop": "SubAgent 停止時觸發",
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "彙整 SubAgent 結果。回覆結構化報告。",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+
+    "_comment_SessionStart": "Session 開始時觸發，用於初始化",
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/init-runtime.js\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+
+    "_comment_SessionEnd": "Session 結束時觸發，用於清理",
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/cleanup.js\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+
+    "_comment_UserPromptSubmit": "用戶提交 prompt 時觸發",
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "分析用戶請求並分類。回覆 JSON: {\"intent\": \"...\", \"complexity\": \"simple|moderate|complex\"}",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+
+    "_comment_PreCompact": "Context compaction 前觸發，保存關鍵狀態（重要！）",
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/pre-compact.js\"",
+            "timeout": 15
+          },
+          {
+            "type": "prompt",
+            "prompt": "提取需要在 compaction 後保留的關鍵資訊：1) 當前任務狀態 2) 重要決策 3) 未完成的工作項目。回覆 JSON 格式。",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+
+    "_comment_Notification": "發送通知時觸發",
+    "Notification": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/log-notification.js\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

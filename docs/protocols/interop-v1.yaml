@@ -1,0 +1,519 @@
+# Vibe Engine 跨 Plugin 互通協議 v1.0
+# 定義 Core 和 Extension plugins 之間的通訊規範
+
+version: "1.0"
+status: draft
+last_updated: "2024-01-01"
+
+# =============================================================================
+# 共享目錄結構
+# =============================================================================
+shared_directory:
+  root: ".vibe-engine"
+  description: "所有 plugins 共享的 runtime 目錄"
+
+  subdirectories:
+    config:
+      path: ".vibe-engine/config.yaml"
+      owner: core
+      readers: [all]
+      description: "全局配置"
+
+    tasks:
+      path: ".vibe-engine/tasks/"
+      owner: core
+      readers: [all]
+      description: "任務狀態"
+
+    checkpoints:
+      path: ".vibe-engine/checkpoints/"
+      owner: core
+      readers: [all]
+      description: "狀態快照"
+
+    memory:
+      path: ".vibe-engine/memory/"
+      owner: memory-plugin
+      readers: [all]
+      description: "長期記憶儲存"
+
+    logs:
+      path: ".vibe-engine/logs/"
+      owner: observability-plugin
+      readers: [all]
+      description: "操作日誌"
+
+    specs:
+      path: ".vibe-engine/specs/"
+      owner: methodology-plugin
+      readers: [all]
+      description: "規格檔案"
+
+    audit:
+      path: ".vibe-engine/audit.jsonl"
+      owner: core
+      readers: [all]
+      description: "審計日誌"
+
+    hooks:
+      path: ".vibe-engine/.hooks/"
+      owner: core
+      readers: [all]
+      description: "Hook 協調用的 flag files"
+
+# =============================================================================
+# 檔案格式定義
+# =============================================================================
+file_formats:
+  task_state:
+    location: ".vibe-engine/tasks/{task_id}/state.json"
+    format: json
+    schema:
+      type: object
+      required: [id, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: "Task 唯一識別碼"
+        status:
+          type: string
+          enum: [pending, in_progress, completed, failed, paused]
+        description:
+          type: string
+        created_at:
+          type: string
+          format: datetime
+        updated_at:
+          type: string
+          format: datetime
+        assigned_agent:
+          type: string
+        parent_task_id:
+          type: string
+          description: "如果是子任務，指向父任務"
+        # 可擴展區塊（各 plugin 可新增）
+        verification:
+          type: object
+          description: "驗證模組寫入"
+        memory_refs:
+          type: array
+          items:
+            type: string
+          description: "記憶模組寫入的相關記憶 ID"
+        budget_usage:
+          type: object
+          description: "觀測模組寫入的預算使用"
+        spec_ref:
+          type: string
+          description: "方法論模組寫入的規格檔路徑"
+
+  memory_item:
+    location: ".vibe-engine/memory/memories.jsonl"
+    format: jsonl
+    schema:
+      type: object
+      required: [id, type, content, created_at]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [semantic, episodic, procedural]
+        content:
+          type: string
+        embedding:
+          type: array
+          items:
+            type: number
+          description: "向量嵌入（可選）"
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        tags:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: datetime
+        last_accessed_at:
+          type: string
+          format: datetime
+        access_count:
+          type: integer
+          minimum: 0
+
+  budget_state:
+    location: ".vibe-engine/observability/budget.json"
+    format: json
+    schema:
+      type: object
+      properties:
+        tokens:
+          type: object
+          properties:
+            used:
+              type: integer
+            limit:
+              type: integer
+            by_model:
+              type: object
+              additionalProperties:
+                type: integer
+        cost:
+          type: object
+          properties:
+            used:
+              type: number
+            limit:
+              type: number
+        last_updated:
+          type: string
+          format: datetime
+
+  spec_file:
+    location: ".vibe-engine/specs/{spec_id}.yaml"
+    format: yaml
+    schema:
+      type: object
+      required: [name, description, done_criteria]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        inputs:
+          type: array
+        outputs:
+          type: array
+        done_criteria:
+          type: array
+        scenarios:
+          type: array
+
+# =============================================================================
+# 事件定義
+# =============================================================================
+events:
+  # Core 發出的事件
+  task_created:
+    emitter: core
+    consumers: [memory, observability, methodology]
+    trigger: "任務創建時"
+    payload:
+      task_id:
+        type: string
+      description:
+        type: string
+      complexity:
+        type: string
+        enum: [simple, moderate, complex]
+
+  task_completed:
+    emitter: core
+    consumers: [verification, memory, observability]
+    trigger: "任務完成時"
+    payload:
+      task_id:
+        type: string
+      result:
+        type: string
+        enum: [success, failed]
+      files_modified:
+        type: array
+        items:
+          type: string
+
+  task_failed:
+    emitter: core
+    consumers: [memory, observability]
+    trigger: "任務失敗時"
+    payload:
+      task_id:
+        type: string
+      error:
+        type: string
+      recovery_attempted:
+        type: boolean
+
+  # Verification 發出的事件
+  verification_completed:
+    emitter: verification
+    consumers: [memory, methodology]
+    trigger: "驗證完成時"
+    payload:
+      task_id:
+        type: string
+      result:
+        type: string
+        enum: [pass, fail]
+      issues:
+        type: array
+
+  # Observability 發出的事件
+  budget_warning:
+    emitter: observability
+    consumers: [core]
+    trigger: "預算達到閾值時"
+    payload:
+      level:
+        type: string
+        enum: ["70%", "85%", "95%", "100%"]
+      remaining_tokens:
+        type: integer
+      suggested_action:
+        type: string
+
+  # Memory 發出的事件
+  memory_retrieved:
+    emitter: memory
+    consumers: [core]
+    trigger: "記憶檢索完成時"
+    payload:
+      query:
+        type: string
+      memories:
+        type: array
+      relevance_scores:
+        type: array
+
+# =============================================================================
+# 環境變數
+# =============================================================================
+environment_variables:
+  shared:
+    VIBE_ENGINE_ROOT:
+      description: "Vibe Engine runtime 目錄的絕對路徑"
+      set_by: core (SessionStart)
+      example: "/path/to/project/.vibe-engine"
+
+    VIBE_AUTONOMY_LEVEL:
+      description: "當前自主等級"
+      set_by: core (SessionStart)
+      values: ["L0", "L1", "L2", "L3", "L4"]
+
+    VIBE_CURRENT_TASK:
+      description: "當前任務 ID"
+      set_by: core
+      example: "task-20240101-001"
+
+  plugin_specific:
+    VIBE_BUDGET_REMAINING:
+      description: "剩餘預算百分比"
+      set_by: observability
+      example: "65"
+
+    VIBE_MEMORY_COUNT:
+      description: "可用記憶數量"
+      set_by: memory
+      example: "42"
+
+# =============================================================================
+# 並行處理協議
+# =============================================================================
+concurrency:
+  file_access:
+    strategy: "optimistic_locking"
+    description: "使用 atomic write (tmp + rename) 避免競爭條件"
+    implementation:
+      write:
+        - "寫入 {file}.tmp"
+        - "rename {file}.tmp -> {file}"
+      read:
+        - "直接讀取 {file}"
+        - "如果解析失敗，等待 100ms 重試"
+
+  hook_coordination:
+    strategy: "flag_files"
+    description: "使用 flag files 協調 hook 執行順序（跨平台 Node.js 實作）"
+    directory: ".vibe-engine/.hooks/"
+
+    patterns:
+      completion_flag: "{hook-name}.done"
+      error_flag: "{hook-name}.error"
+      data_file: "{hook-name}.data.json"
+      lock_file: "{hook-name}.lock"
+
+    implementation:
+      - "Hook 完成時創建 .done 文件"
+      - "Hook 失敗時創建 .error 文件"
+      - "相依的 hook 等待前置 hook 的 .done 文件"
+      - "SessionStart 時清理所有 flag files"
+
+    # 重要：所有 hook 腳本使用 Node.js 確保跨平台相容性
+    cross_platform:
+      runtime: "node"
+      reason: "Bash 在 Windows 需要 WSL/Git Bash，Node.js 原生支援所有平台"
+
+    # Node.js 範例實作
+    node_implementation: |
+      // hooks/scripts/lib/coordination.js
+      const fs = require('fs');
+      const path = require('path');
+
+      const HOOKS_DIR = path.join(
+        process.env.VIBE_ENGINE_ROOT || '.vibe-engine',
+        '.hooks'
+      );
+
+      // 確保目錄存在
+      fs.mkdirSync(HOOKS_DIR, { recursive: true });
+
+      module.exports = {
+        // 標記 hook 完成
+        markDone: (hookName) => {
+          fs.writeFileSync(path.join(HOOKS_DIR, `${hookName}.done`), '');
+        },
+
+        // 標記 hook 失敗
+        markError: (hookName, error) => {
+          fs.writeFileSync(
+            path.join(HOOKS_DIR, `${hookName}.error`),
+            JSON.stringify({ error: error.message, stack: error.stack })
+          );
+        },
+
+        // 等待前置 hook
+        waitFor: async (hookName, timeoutMs = 5000) => {
+          const doneFile = path.join(HOOKS_DIR, `${hookName}.done`);
+          const errorFile = path.join(HOOKS_DIR, `${hookName}.error`);
+          const start = Date.now();
+
+          while (Date.now() - start < timeoutMs) {
+            if (fs.existsSync(doneFile)) return { status: 'done' };
+            if (fs.existsSync(errorFile)) return { status: 'error' };
+            await new Promise(r => setTimeout(r, 100));
+          }
+          return { status: 'timeout' };
+        },
+
+        // SessionStart 時清理
+        cleanupAll: () => {
+          if (fs.existsSync(HOOKS_DIR)) {
+            const files = fs.readdirSync(HOOKS_DIR);
+            files.forEach(f => fs.unlinkSync(path.join(HOOKS_DIR, f)));
+          }
+        }
+      };
+
+    # PreCompact 協調
+    pre_compact:
+      purpose: "在 context compaction 前保存關鍵狀態"
+      triggers:
+        - "Context 使用率達到 80%"
+        - "Claude Code 自動觸發 compaction"
+      actions:
+        - "保存當前任務狀態到 .vibe-engine/checkpoints/"
+        - "提取關鍵記憶到 .vibe-engine/memory/pre-compact-{timestamp}.json"
+        - "記錄未完成的工作項目"
+      implementation: |
+        // hooks/scripts/pre-compact.js
+        const fs = require('fs');
+        const path = require('path');
+
+        const ROOT = process.env.VIBE_ENGINE_ROOT || '.vibe-engine';
+
+        // 讀取當前任務狀態
+        const tasksDir = path.join(ROOT, 'tasks');
+        const currentTask = getCurrentTask(tasksDir);
+
+        // 保存快照
+        const snapshot = {
+          timestamp: new Date().toISOString(),
+          task: currentTask,
+          reason: 'pre_compact'
+        };
+
+        // 寫入 checkpoint
+        const checkpointPath = path.join(
+          ROOT, 'checkpoints',
+          `pre-compact-${Date.now()}.json`
+        );
+        fs.mkdirSync(path.dirname(checkpointPath), { recursive: true });
+        fs.writeFileSync(checkpointPath, JSON.stringify(snapshot, null, 2));
+
+        console.log(JSON.stringify({
+          systemMessage: `Pre-compact checkpoint saved: ${checkpointPath}`
+        }));
+
+# =============================================================================
+# 錯誤處理
+# =============================================================================
+error_handling:
+  file_not_found:
+    action: "使用預設值或跳過"
+    log: true
+
+  parse_error:
+    action: "記錄錯誤，使用預設值"
+    retry: true
+    max_retries: 3
+
+  timeout:
+    action: "記錄超時，繼續執行"
+    default_timeout: 5000
+
+  plugin_unavailable:
+    action: "優雅降級，跳過該 plugin 的功能"
+    log: true
+
+# =============================================================================
+# 版本相容性
+# =============================================================================
+compatibility:
+  minimum_core_version: "0.1.0"
+  breaking_changes:
+    - version: "1.0.0"
+      change: "Initial protocol"
+      migration: "N/A"
+
+# =============================================================================
+# 使用範例
+# =============================================================================
+examples:
+  task_workflow:
+    description: "完整的任務生命週期"
+    steps:
+      - step: 1
+        action: "Core 創建任務"
+        file_write: ".vibe-engine/tasks/{id}/state.json"
+        event_emit: "task_created"
+
+      - step: 2
+        action: "Memory 檢索相關記憶"
+        file_read: ".vibe-engine/memory/memories.jsonl"
+        event_emit: "memory_retrieved"
+
+      - step: 3
+        action: "Observability 開始追蹤"
+        file_write: ".vibe-engine/observability/budget.json"
+
+      - step: 4
+        action: "任務執行中..."
+
+      - step: 5
+        action: "Core 標記任務完成"
+        file_write: ".vibe-engine/tasks/{id}/state.json"
+        event_emit: "task_completed"
+
+      - step: 6
+        action: "Verification 執行驗證"
+        event_emit: "verification_completed"
+
+      - step: 7
+        action: "Memory 固化經驗"
+        file_write: ".vibe-engine/memory/memories.jsonl"
+
+  cross_plugin_query:
+    description: "跨 plugin 查詢範例"
+    code: |
+      #!/bin/bash
+      # Core 查詢 Memory plugin 的記憶
+
+      # 透過共享檔案
+      MEMORIES=$(cat "$VIBE_ENGINE_ROOT/memory/memories.jsonl" | \
+        jq -s '[.[] | select(.tags | contains(["auth"]))]')
+
+      # 或透過腳本（如果 Memory plugin 提供）
+      MEMORIES=$("${CLAUDE_PLUGIN_ROOT}/../vibe-engine-memory/scripts/query-memories.sh" "auth")

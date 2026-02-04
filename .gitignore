@@ -1,0 +1,31 @@
+# Runtime directories
+.vibe-engine/tasks/
+.vibe-engine/checkpoints/
+.vibe-engine/memory/
+.vibe-engine/logs/
+.vibe-engine/instincts/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node
+node_modules/
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Temp files
+*.tmp
+*.temp

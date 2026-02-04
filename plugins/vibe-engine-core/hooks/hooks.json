@@ -1,0 +1,83 @@
+{
+  "description": "Vibe Engine Core lifecycle hooks - 提供會話初始化、請求分類、權限控制、結果記錄、完成檢查、狀態保存",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-init.js\"",
+            "timeout": 10
+          }
+        ],
+        "description": "初始化 Vibe Engine 運行時環境"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/prompt-classifier.js\"",
+            "timeout": 5
+          }
+        ],
+        "description": "分類用戶請求，決定處理策略"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/permission-guard.js\"",
+            "timeout": 5
+          }
+        ],
+        "description": "檢查危險操作權限和預算"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/result-logger.js\"",
+            "timeout": 3
+          }
+        ],
+        "description": "記錄工具執行結果"
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/completion-check.js\"",
+            "timeout": 10
+          }
+        ],
+        "description": "驗證任務是否真正完成"
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/state-saver.js\"",
+            "timeout": 15
+          }
+        ],
+        "description": "在 context compaction 前保存關鍵狀態"
+      }
+    ]
+  }
+}
