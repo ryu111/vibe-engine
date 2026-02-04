@@ -1,7 +1,7 @@
 # Vibe Engine 實作進度
 
 > 最後更新: 2026-02-05
-> 當前版本: v0.5.3
+> 當前版本: v0.6.0
 > 內部驗證: ✅ 通過 (54/54)
 > 載入測試: ✅ 通過 (32/32) - vibe-test 專案
 
@@ -69,6 +69,7 @@
 
 | 版本 | 日期 | 變更摘要 |
 |------|------|----------|
+| 0.6.0 | 2026-02-05 | vibe-engine-memory 功能實作：7 lib 模組 + 3 完整 hooks + Confidence Scoring + Instinct Learning |
 | 0.5.3 | 2026-02-05 | 新增 vibe-engine-memory plugin 骨架：2 agents, 3 skills, 5 commands, 3 hooks |
 | 0.5.2 | 2026-02-04 | 修正 Permission Guard hookSpecificOutput 格式，新增 health-check.js |
 | 0.5.1 | 2026-02-04 | 修正 hooks 路徑問題：.vibe-engine 目錄正確建立在用戶專案 |
@@ -88,7 +89,7 @@
 | Ch2 閉環驗證 | reviewer, tester, verification-engine | ✅ |
 | Ch3 狀態管理 | state-saver, (P1: checkpoint-manager) | 🔳 |
 | Ch4 錯誤恢復 | error-recovery, auto-fix-loop, circuit-breaker, saga-compensation | ✅ |
-| Ch5 記憶系統 | vibe-engine-memory (骨架完成) | 🔲 |
+| Ch5 記憶系統 | vibe-engine-memory (功能實作完成) | 🔳 |
 | Ch6 資源管理 | budget-tracker-engine, PreToolUse hook | ✅ |
 | Ch7 可觀測性 | /status, result-logger, PostToolUse hook | ✅ |
 | Ch8 自主等級 | CLAUDE.md 規則 | 🔲 |
@@ -194,7 +195,7 @@
 
 ---
 
-## vibe-engine-memory (P1) 🔲 骨架完成
+## vibe-engine-memory (P1) 🔳 功能實作完成
 
 ### 基礎結構
 - [x] plugin.json
@@ -202,35 +203,50 @@
 - [x] README.md
 - [x] CLAUDE.md
 
+### Lib 模組（新增）
+- [x] lib/common.js - ✅ 共用函數（路徑、ID、時間）
+- [x] lib/jsonl.js - ✅ JSONL 讀寫（CRUD + 查詢）
+- [x] lib/memory-item.js - ✅ MemoryItem 結構（創建、驗證、格式化）
+- [x] lib/confidence.js - ✅ Confidence Scoring（等級、衰減、閾值）
+- [x] lib/memory-store.js - ✅ MemoryStore（三層記憶 CRUD）
+- [x] lib/instinct-manager.js - ✅ InstinctManager（CRUD、聚類、演化建議）
+- [x] lib/checkpoint-manager.js - ✅ CheckpointManager（創建、驗證、清理）
+
 ### Agents
-- [x] memory-curator.md - 🔲 骨架（記憶提取、去重、分類）
-- [x] pattern-detector.md - 🔲 骨架（模式檢測、Instinct 生成）
+- [x] memory-curator.md - 🔲 骨架（待連接 lib）
+- [x] pattern-detector.md - 🔲 骨架（待連接 lib）
 
 ### Skills
-- [x] memory-manager - 🔲 骨架（三層記憶 CRUD）
-- [x] checkpoint-manager - 🔲 骨架（狀態快照管理）
-- [x] instinct-learning - 🔲 骨架（Pattern → Instinct）
+- [x] memory-manager - 🔲 骨架（lib 已實作）
+- [x] checkpoint-manager - 🔲 骨架（lib 已實作）
+- [x] instinct-learning - 🔲 骨架（lib 已實作）
 
 ### Commands
-- [x] /remember - 🔲 骨架（儲存記憶）
-- [x] /recall - 🔲 骨架（檢索記憶）
-- [x] /checkpoint - 🔲 骨架（狀態快照）
-- [x] /evolve - 🔲 骨架（Instinct 演化）
-- [x] /instinct-status - 🔲 骨架（查看 Instincts）
+- [x] /remember - 🔲 骨架（待連接 memory-store）
+- [x] /recall - 🔲 骨架（待連接 memory-store）
+- [x] /checkpoint - 🔲 骨架（待連接 checkpoint-manager）
+- [x] /evolve - 🔲 骨架（待連接 instinct-manager）
+- [x] /instinct-status - 🔲 骨架（待連接 instinct-manager）
 
 ### Hooks
 - [x] hooks.json
-- [x] memory-init.js - 🔲 骨架（SessionStart: 載入相關記憶）
-- [x] observation-collector.js - 🔲 骨架（PostToolUse: 收集觀察）
-- [x] memory-consolidation.js - 🔲 骨架（Stop: 固化記憶）
+- [x] memory-init.js - ✅ 完成（載入高信心記憶 + Instincts）
+- [x] observation-collector.js - ✅ 完成（智慧判斷 + 糾正偵測）
+- [x] memory-consolidation.js - ✅ 完成（分析 + 固化 + 衰減）
 
 ### 驗證結果
 | 項目 | 數量 | 狀態 |
 |------|------|------|
-| 檔案總數 | 18 | ✅ |
-| JSON 驗證 | 3/3 | ✅ |
-| Hook 語法 | 3/3 | ✅ |
+| 檔案總數 | 25 | ✅ |
+| Lib 模組 | 7/7 | ✅ |
+| Hook 語法 | 10/10 | ✅ |
 | Frontmatter | 10/10 | ✅ |
+
+### 功能亮點
+- **Confidence Scoring**: 四等級信心系統（tentative → near_certain）
+- **Memory Decay**: 自動衰減未使用記憶（每月 -0.01，最低 0.2）
+- **Instinct Learning**: 觀察 → 模式 → Instinct → 聚類 → 演化
+- **User Correction Detection**: 自動偵測用戶糾正模式
 
 ---
 

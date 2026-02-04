@@ -4,72 +4,116 @@
  *
  * 功能：
  * 1. 初始化記憶系統目錄結構
- * 2. 載入相關背景記憶
+ * 2. 載入高信心背景記憶
  * 3. 注入到會話上下文
  *
+ * 觸發時機：SessionStart
  * 對應章節：Ch5 記憶系統
  */
 
-const fs = require('fs');
 const path = require('path');
+const { getProjectRoot, ensureVibeEngineDirs } = require('./lib/common');
+const { MemoryStore } = require('./lib/memory-store');
+const { formatMemoryItem, MEMORY_TYPES } = require('./lib/memory-item');
+const { THRESHOLDS, getConfidenceIcon } = require('./lib/confidence');
 
 /**
- * 獲取專案根目錄
+ * 載入高信心記憶並格式化為注入字串
+ *
+ * @param {MemoryStore} store - 記憶存儲
+ * @param {number} maxMemories - 最大記憶數量
+ * @returns {object} - { memories, formatted }
  */
-function getProjectRoot() {
-  if (process.env.CLAUDE_PROJECT_ROOT) {
-    return process.env.CLAUDE_PROJECT_ROOT;
+function loadAndFormatMemories(store, maxMemories = 10) {
+  // 查找高信心記憶（>= 0.7）
+  const memories = store.findHighConfidence(THRESHOLDS.AUTO_APPLY, {
+    limit: maxMemories
+  });
+
+  if (memories.length === 0) {
+    return { memories: [], formatted: '' };
   }
 
-  const cwd = process.cwd();
-  if (cwd.includes('.claude/plugins/cache')) {
-    return path.join(process.env.HOME || '/tmp', '.vibe-engine-global');
-  }
-
-  let current = cwd;
-  while (current !== '/') {
-    if (fs.existsSync(path.join(current, '.git')) ||
-        fs.existsSync(path.join(current, '.vibe-engine')) ||
-        fs.existsSync(path.join(current, 'package.json'))) {
-      return current;
-    }
-    current = path.dirname(current);
-  }
-
-  return cwd;
-}
-
-const PROJECT_ROOT = getProjectRoot();
-const VIBE_ENGINE_DIR = path.join(PROJECT_ROOT, '.vibe-engine');
-const MEMORY_DIR = path.join(VIBE_ENGINE_DIR, 'memory');
-const INSTINCTS_DIR = path.join(VIBE_ENGINE_DIR, 'instincts');
-
-/**
- * 確保目錄存在
- */
-function ensureDirectories() {
-  const dirs = [
-    MEMORY_DIR,
-    path.join(MEMORY_DIR, 'archive'),
-    INSTINCTS_DIR
+  // 格式化為注入字串
+  const lines = [
+    '## \u{1F4BE} Background Memory',
+    ''
   ];
 
-  for (const dir of dirs) {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
+  // 按類型分組
+  const byType = {};
+  for (const mem of memories) {
+    const type = mem.type || 'unknown';
+    if (!byType[type]) byType[type] = [];
+    byType[type].push(mem);
   }
+
+  const typeLabels = {
+    [MEMORY_TYPES.SEMANTIC]: '\u{1F4CC} Project Facts',      // 📌
+    [MEMORY_TYPES.EPISODIC]: '\u{1F4A1} Past Experiences',   // 💡
+    [MEMORY_TYPES.PROCEDURAL]: '\u{1F4CB} Procedures'        // 📋
+  };
+
+  for (const [type, items] of Object.entries(byType)) {
+    const label = typeLabels[type] || type;
+    lines.push(`### ${label}`);
+
+    for (const item of items) {
+      const icon = getConfidenceIcon(item.metadata?.confidence || 0);
+      const conf = ((item.metadata?.confidence || 0) * 100).toFixed(0);
+      lines.push(`- ${item.content} ${icon} (${conf}%)`);
+    }
+
+    lines.push('');
+  }
+
+  lines.push('---');
+  lines.push('');
+
+  return {
+    memories,
+    formatted: lines.join('\n')
+  };
 }
 
 /**
- * 載入高信心記憶
+ * 載入活躍的 Instincts
+ *
+ * @param {string} instinctsDir - Instincts 目錄
+ * @returns {Array} - Instinct 列表
  */
-function loadHighConfidenceMemories() {
-  // TODO: 實作記憶載入邏輯
-  // 1. 讀取 semantic.jsonl, episodic.jsonl, procedural.jsonl
-  // 2. 過濾 confidence >= 0.7
-  // 3. 返回格式化的記憶摘要
-  return [];
+function loadActiveInstincts(instinctsDir) {
+  const fs = require('fs');
+
+  if (!fs.existsSync(instinctsDir)) {
+    return [];
+  }
+
+  const instincts = [];
+
+  try {
+    const files = fs.readdirSync(instinctsDir).filter(f => f.endsWith('.md'));
+
+    for (const file of files.slice(0, 5)) { // 最多 5 個
+      const content = fs.readFileSync(path.join(instinctsDir, file), 'utf8');
+
+      // 解析 YAML frontmatter
+      const match = content.match(/^---\n([\s\S]*?)\n---/);
+      if (match) {
+        const yaml = match[1];
+        const trigger = yaml.match(/trigger:\s*"?([^"\n]+)"?/)?.[1];
+        const confidence = parseFloat(yaml.match(/confidence:\s*([\d.]+)/)?.[1] || '0.5');
+
+        if (trigger && confidence >= 0.5) {
+          instincts.push({ trigger, confidence });
+        }
+      }
+    }
+  } catch (e) {
+    // 忽略錯誤
+  }
+
+  return instincts;
 }
 
 /**
@@ -88,20 +132,58 @@ async function main() {
   }
 
   try {
-    // 確保目錄結構
-    ensureDirectories();
+    const projectRoot = getProjectRoot();
+    const paths = ensureVibeEngineDirs(projectRoot);
+
+    // 初始化記憶存儲
+    const store = new MemoryStore(projectRoot);
 
     // 載入高信心記憶
-    const memories = loadHighConfidenceMemories();
+    const { memories, formatted } = loadAndFormatMemories(store, 10);
 
-    // 輸出結果
+    // 載入活躍 Instincts
+    const instincts = loadActiveInstincts(paths.instincts);
+
+    // 獲取統計
+    const stats = store.getStats();
+
+    // 構建輸出
     const output = {
       continue: true,
       suppressOutput: false
     };
 
+    // 構建系統訊息
+    const messageParts = [];
+
     if (memories.length > 0) {
-      output.systemMessage = `[Memory Init] Loaded ${memories.length} high-confidence memories.`;
+      messageParts.push(`[Memory Init] Loaded ${memories.length} memories`);
+    }
+
+    if (instincts.length > 0) {
+      messageParts.push(`${instincts.length} instincts active`);
+    }
+
+    if (stats.total > 0) {
+      messageParts.push(`(total: ${stats.total} in store)`);
+    }
+
+    if (messageParts.length > 0) {
+      output.systemMessage = messageParts.join(' | ');
+
+      // 如果有高信心記憶，注入到 context
+      if (formatted) {
+        output.systemMessage += '\n\n' + formatted;
+      }
+
+      // 如果有活躍 Instincts，也注入
+      if (instincts.length > 0) {
+        output.systemMessage += '\n## \u{1F9E0} Active Instincts\n\n';
+        for (const inst of instincts) {
+          const icon = getConfidenceIcon(inst.confidence);
+          output.systemMessage += `- ${inst.trigger} ${icon}\n`;
+        }
+      }
     }
 
     console.log(JSON.stringify(output));
@@ -116,8 +198,3 @@ async function main() {
 }
 
 main().catch(console.error);
-
-// TODO: 實作完整記憶載入邏輯
-// - 根據當前任務選擇相關記憶
-// - 計算相關性分數
-// - 控制注入數量（避免 context 過載）
