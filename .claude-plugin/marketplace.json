@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "vibe-engine",
+  "version": "0.1.0",
+  "description": "Vibe Engine - Claude Code Plugin for systematic AI workflow infrastructure",
+  "owner": {
+    "name": "Vibe Engine Team"
+  },
+  "plugins": [
+    {
+      "name": "vibe-engine-core",
+      "description": "核心協調引擎，包含 5 個 agents、5 個 skills、6 個 hooks、4 個 commands",
+      "source": "./plugins/vibe-engine-core",
+      "category": "development"
+    }
+  ]
+}
