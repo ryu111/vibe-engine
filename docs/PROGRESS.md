@@ -42,7 +42,7 @@
 ### Hooks
 - [x] hooks.json
 - [x] session-init.js - ✅ 完成
-- [x] prompt-classifier.js - 🔲 已建殼
+- [x] prompt-classifier.js - ✅ 完成
 - [x] permission-guard.js - ✅ 完成
 - [x] result-logger.js - ✅ 完成
 - [x] completion-check.js - ✅ 完成
