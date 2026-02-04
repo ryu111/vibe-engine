@@ -47,15 +47,12 @@ process.stdin.on('end', () => {
       reason = 'Task appears to have errors. Consider fixing before stopping.';
     }
 
-    // 輸出決定
+    // 輸出決定（Stop hook 不支援自定義 hookSpecificOutput）
     const output = {
       continue: true,
       suppressOutput: false,
-      hookSpecificOutput: {
-        decision: decision,
-        reason: reason,
-        checks: checks
-      }
+      decision: decision,
+      reason: reason
     };
 
     if (decision === 'block') {
@@ -70,10 +67,8 @@ process.stdin.on('end', () => {
     console.log(JSON.stringify({
       continue: true,
       suppressOutput: false,
-      hookSpecificOutput: {
-        decision: 'approve',
-        reason: `Check skipped: ${error.message}`
-      }
+      decision: 'approve',
+      reason: `Check skipped: ${error.message}`
     }));
   }
 });
