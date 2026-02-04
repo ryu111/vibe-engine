@@ -1,0 +1,17 @@
+{
+  "name": "vibe-engine-memory",
+  "version": "0.5.3",
+  "description": "Vibe Engine 記憶模組 - 三層記憶架構、Confidence Scoring、Instinct Learning",
+  "author": {
+    "name": "Vibe Engine Team"
+  },
+  "repository": "https://github.com/user/vibe-engine",
+  "license": "MIT",
+  "keywords": [
+    "vibe-engineering",
+    "memory",
+    "instinct-learning",
+    "checkpoint",
+    "confidence-scoring"
+  ]
+}

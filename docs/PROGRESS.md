@@ -1,7 +1,7 @@
 # Vibe Engine 實作進度
 
-> 最後更新: 2026-02-04
-> 當前版本: v0.5.2
+> 最後更新: 2026-02-05
+> 當前版本: v0.5.3
 > 內部驗證: ✅ 通過 (54/54)
 > 載入測試: ✅ 通過 (32/32) - vibe-test 專案
 
@@ -69,6 +69,7 @@
 
 | 版本 | 日期 | 變更摘要 |
 |------|------|----------|
+| 0.5.3 | 2026-02-05 | 新增 vibe-engine-memory plugin 骨架：2 agents, 3 skills, 5 commands, 3 hooks |
 | 0.5.2 | 2026-02-04 | 修正 Permission Guard hookSpecificOutput 格式，新增 health-check.js |
 | 0.5.1 | 2026-02-04 | 修正 hooks 路徑問題：.vibe-engine 目錄正確建立在用戶專案 |
 | 0.5.0 | 2026-02-04 | Forced Eval Pattern 全面應用：8 skills + 6 hooks 使用強制語言，84% 遵循率 |
@@ -87,7 +88,7 @@
 | Ch2 閉環驗證 | reviewer, tester, verification-engine | ✅ |
 | Ch3 狀態管理 | state-saver, (P1: checkpoint-manager) | 🔳 |
 | Ch4 錯誤恢復 | error-recovery, auto-fix-loop, circuit-breaker, saga-compensation | ✅ |
-| Ch5 記憶系統 | (P1: memory-manager) | - |
+| Ch5 記憶系統 | vibe-engine-memory (骨架完成) | 🔲 |
 | Ch6 資源管理 | budget-tracker-engine, PreToolUse hook | ✅ |
 | Ch7 可觀測性 | /status, result-logger, PostToolUse hook | ✅ |
 | Ch8 自主等級 | CLAUDE.md 規則 | 🔲 |
@@ -119,9 +120,9 @@
 - [x] 建立載入測試指南 (docs/load-test-guide.md)
 
 ### 待完成（按優先級）
-1. [ ] **P1**: 建立 vibe-engine-memory plugin（Ch5 記憶系統）
-2. [ ] **P2**: 建立 vibe-engine-dashboard plugin（Ch7 TUI Dashboard）
-3. [ ] **P2**: 建立 vibe-engine-learning plugin（Ch5 Instinct Learning）
+1. [x] **P1**: 建立 vibe-engine-memory plugin 骨架 ✅ (18 files)
+2. [ ] **P1**: 補充 vibe-engine-memory 功能實作
+3. [ ] **P2**: 建立 vibe-engine-dashboard plugin（Ch7 TUI Dashboard）
 
 ---
 
@@ -193,8 +194,46 @@
 
 ---
 
-## vibe-engine-memory (P1)
-（待規劃）
+## vibe-engine-memory (P1) 🔲 骨架完成
 
-## vibe-engine-learning (P2)
-（待 P1 完成後規劃）
+### 基礎結構
+- [x] plugin.json
+- [x] marketplace.json
+- [x] README.md
+- [x] CLAUDE.md
+
+### Agents
+- [x] memory-curator.md - 🔲 骨架（記憶提取、去重、分類）
+- [x] pattern-detector.md - 🔲 骨架（模式檢測、Instinct 生成）
+
+### Skills
+- [x] memory-manager - 🔲 骨架（三層記憶 CRUD）
+- [x] checkpoint-manager - 🔲 骨架（狀態快照管理）
+- [x] instinct-learning - 🔲 骨架（Pattern → Instinct）
+
+### Commands
+- [x] /remember - 🔲 骨架（儲存記憶）
+- [x] /recall - 🔲 骨架（檢索記憶）
+- [x] /checkpoint - 🔲 骨架（狀態快照）
+- [x] /evolve - 🔲 骨架（Instinct 演化）
+- [x] /instinct-status - 🔲 骨架（查看 Instincts）
+
+### Hooks
+- [x] hooks.json
+- [x] memory-init.js - 🔲 骨架（SessionStart: 載入相關記憶）
+- [x] observation-collector.js - 🔲 骨架（PostToolUse: 收集觀察）
+- [x] memory-consolidation.js - 🔲 骨架（Stop: 固化記憶）
+
+### 驗證結果
+| 項目 | 數量 | 狀態 |
+|------|------|------|
+| 檔案總數 | 18 | ✅ |
+| JSON 驗證 | 3/3 | ✅ |
+| Hook 語法 | 3/3 | ✅ |
+| Frontmatter | 10/10 | ✅ |
+
+---
+
+## 待規劃 (P2+)
+
+- vibe-engine-dashboard（Ch7 TUI Dashboard）
