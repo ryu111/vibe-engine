@@ -23,8 +23,39 @@ const path = require('path');
 // ============================================================
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '../..');
-const WORKSPACE_ROOT = process.env.CLAUDE_PROJECT_ROOT || process.cwd();
-const VIBE_ENGINE_DIR = path.join(WORKSPACE_ROOT, '.vibe-engine');
+
+/**
+ * 獲取用戶專案根目錄
+ */
+function getProjectRoot() {
+  // 優先使用環境變數
+  if (process.env.CLAUDE_PROJECT_ROOT) {
+    return process.env.CLAUDE_PROJECT_ROOT;
+  }
+
+  const cwd = process.cwd();
+
+  // 如果 CWD 在 plugin cache 內，無法確定專案目錄
+  if (cwd.includes('.claude/plugins/cache')) {
+    return path.join(process.env.HOME || '/tmp', '.vibe-engine-global');
+  }
+
+  // 向上查找專案根目錄
+  let current = cwd;
+  while (current !== '/') {
+    if (fs.existsSync(path.join(current, '.git')) ||
+        fs.existsSync(path.join(current, '.vibe-engine')) ||
+        fs.existsSync(path.join(current, 'package.json'))) {
+      return current;
+    }
+    current = path.dirname(current);
+  }
+
+  return cwd;
+}
+
+const PROJECT_ROOT = getProjectRoot();
+const VIBE_ENGINE_DIR = path.join(PROJECT_ROOT, '.vibe-engine');
 const TASKS_DIR = path.join(VIBE_ENGINE_DIR, 'tasks');
 
 // Agent 定義

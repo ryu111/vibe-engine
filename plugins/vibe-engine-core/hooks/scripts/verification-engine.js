@@ -25,8 +25,36 @@ const { execSync, spawn } = require('child_process');
 // ============================================================
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '../..');
-const WORKSPACE_ROOT = process.env.CLAUDE_PROJECT_ROOT || process.cwd();
-const VIBE_ENGINE_DIR = path.join(WORKSPACE_ROOT, '.vibe-engine');
+
+/**
+ * 獲取用戶專案根目錄
+ */
+function getProjectRoot() {
+  if (process.env.CLAUDE_PROJECT_ROOT) {
+    return process.env.CLAUDE_PROJECT_ROOT;
+  }
+
+  const cwd = process.cwd();
+
+  if (cwd.includes('.claude/plugins/cache')) {
+    return path.join(process.env.HOME || '/tmp', '.vibe-engine-global');
+  }
+
+  let current = cwd;
+  while (current !== '/') {
+    if (fs.existsSync(path.join(current, '.git')) ||
+        fs.existsSync(path.join(current, '.vibe-engine')) ||
+        fs.existsSync(path.join(current, 'package.json'))) {
+      return current;
+    }
+    current = path.dirname(current);
+  }
+
+  return cwd;
+}
+
+const PROJECT_ROOT = getProjectRoot();
+const VIBE_ENGINE_DIR = path.join(PROJECT_ROOT, '.vibe-engine');
 const VERIFICATION_DIR = path.join(VIBE_ENGINE_DIR, 'verification');
 
 // 驗證層級配置
@@ -133,7 +161,7 @@ function detectProjectType() {
 
   for (const [type, config] of Object.entries(PROJECT_TYPES)) {
     for (const indicator of config.indicators) {
-      const indicatorPath = path.join(WORKSPACE_ROOT, indicator);
+      const indicatorPath = path.join(PROJECT_ROOT, indicator);
       if (fs.existsSync(indicatorPath)) {
         detected.push(type);
         break;
@@ -160,7 +188,7 @@ function getAvailableCommands(projectType) {
 
   // 檢查 package.json scripts
   if (projectType === 'nodejs' || projectType === 'typescript') {
-    const pkgPath = path.join(WORKSPACE_ROOT, 'package.json');
+    const pkgPath = path.join(PROJECT_ROOT, 'package.json');
     if (fs.existsSync(pkgPath)) {
       try {
         const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
@@ -178,7 +206,7 @@ function getAvailableCommands(projectType) {
         }
         if (scripts.typecheck || scripts['type-check']) {
           available.typecheck = scripts.typecheck ? 'npm run typecheck' : 'npm run type-check';
-        } else if (fs.existsSync(path.join(WORKSPACE_ROOT, 'tsconfig.json'))) {
+        } else if (fs.existsSync(path.join(PROJECT_ROOT, 'tsconfig.json'))) {
           available.typecheck = 'npx tsc --noEmit';
         }
       } catch (e) {
@@ -264,7 +292,7 @@ function selectVerificationLevel(budget, changeType) {
  * 執行命令並捕獲結果
  */
 function runCommand(command, options = {}) {
-  const { timeout = 60000, cwd = WORKSPACE_ROOT } = options;
+  const { timeout = 60000, cwd = PROJECT_ROOT } = options;
 
   try {
     const output = execSync(command, {
@@ -454,7 +482,7 @@ async function runLLMJudge(context) {
   let changes = '';
   try {
     changes = execSync('git diff --cached --stat 2>/dev/null || git diff HEAD~1 --stat 2>/dev/null', {
-      cwd: WORKSPACE_ROOT,
+      cwd: PROJECT_ROOT,
       encoding: 'utf8',
       timeout: 10000
     }).trim();

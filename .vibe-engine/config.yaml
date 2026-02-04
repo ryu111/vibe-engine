@@ -1,60 +1,8 @@
-# Vibe Engine 全局配置
-# 此檔案定義預設值，可被專案的 .vibe-engine/config.yaml 覆蓋
-
-# 自主等級（L0-L4）
-autonomy:
-  default_level: L2
-  # L0: 每個操作都需確認
-  # L1: 讀取自動，寫入確認
-  # L2: 低風險自動，中風險確認，高風險阻止（預設）
-  # L3: 大部分自動，關鍵點確認
-  # L4: 幾乎全自動，僅不可逆確認
-
-# 資源限制
-resources:
-  tokens:
-    per_task:
-      simple: 20000
-      moderate: 50000
-      complex: 150000
-    memory_injection_limit: 0.15  # 15% of context
-    verification_reserve: 0.20    # 20% of budget
-
-  parallelism:
-    max_agents: 4
-    single_file_writers: true  # 同一檔案只能有一個 writer
-
-# 驗證配置
-verification:
-  default_level: standard
-  levels:
-    minimal:
-      - static_analysis
-    standard:
-      - static_analysis
-      - unit_tests
-      - llm_judge
-    thorough:
-      - static_analysis
-      - unit_tests
-      - integration_tests
-      - llm_judge
-      - architect_review
-
-# 模型路由
-model_routing:
-  default: sonnet
-  by_complexity:
-    simple: haiku
-    moderate: sonnet
-    complex: opus
-  by_budget:
-    low: haiku
-    medium: sonnet
-    high: opus
-
-# 日誌配置
-logging:
-  level: info
-  retention_days: 30
-  structured: true
+budget:
+  limits:
+    cost_per_task: 1.00
+    tokens_per_task: 100000
+  alerts:
+    warning: 0.70
+    urgent: 0.90
+    exceeded: 1.00

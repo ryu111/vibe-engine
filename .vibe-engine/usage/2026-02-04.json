@@ -1,0 +1,1 @@
+{"default": {"tokens": {"prompt": 50000, "completion": 50000, "total": 100000}, "cost": 1.05, "operations": {"file_edits": 50}}}
