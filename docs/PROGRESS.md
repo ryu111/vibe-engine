@@ -66,6 +66,7 @@
 
 | 版本 | 日期 | 變更摘要 |
 |------|------|----------|
+| 0.3.0 | 2026-02-04 | 新增 vibe-engine-guarantee plugin：錯誤恢復、自動修復循環、熔斷器 |
 | 0.2.0 | 2026-02-04 | Agent ↔ Skill 整合：agents 添加 skills 欄位，文檔更新決策指南 |
 | 0.1.0 | 2026-02-04 | 初始版本：5 agents, 5 skills, 4 commands, 10 hooks |
 

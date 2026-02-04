@@ -1,0 +1,20 @@
+{
+  "name": "vibe-engine-guarantee",
+  "version": "0.1.0",
+  "description": "Vibe Engine 保障模組 - 錯誤恢復、自動修復循環、健康檢查、熔斷器",
+  "author": {
+    "name": "Vibe Engine Team"
+  },
+  "repository": "https://github.com/user/vibe-engine",
+  "license": "MIT",
+  "keywords": [
+    "vibe-engineering",
+    "error-recovery",
+    "auto-fix",
+    "circuit-breaker",
+    "health-check"
+  ],
+  "dependencies": [
+    "vibe-engine-core"
+  ]
+}

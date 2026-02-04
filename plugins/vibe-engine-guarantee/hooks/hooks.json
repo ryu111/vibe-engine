@@ -1,0 +1,44 @@
+{
+  "description": "Vibe Engine Guarantee lifecycle hooks - circuit breaker, error handler, auto-fix trigger",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/circuit-breaker.js\"",
+            "timeout": 5
+          }
+        ],
+        "description": "Check circuit breaker state before risky operations"
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "tester|reviewer",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/error-handler.js\"",
+            "timeout": 10
+          }
+        ],
+        "description": "Handle errors from tester/reviewer and trigger auto-fix if needed"
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/circuit-breaker.js\" --reset-on-success",
+            "timeout": 5
+          }
+        ],
+        "description": "Reset circuit breaker on successful completion"
+      }
+    ]
+  }
+}
