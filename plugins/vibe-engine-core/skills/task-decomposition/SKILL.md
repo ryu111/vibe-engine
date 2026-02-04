@@ -1,6 +1,6 @@
 ---
 name: task-decomposition
-description: This skill should be used when the user asks to "break down a task", "decompose work", "split into subtasks", "parallelize tasks", or when a complex request involves multiple files, agents, or responsibilities. Provides systematic task decomposition following Star Topology principles.
+description: ⛔ MANDATORY when task involves multiple files OR multiple agents OR user says "implement", "develop", "build" features. MUST decompose BEFORE any implementation. CRITICAL - 未執行任務分解禁止開始編碼。
 version: 0.1.0
 ---
 
@@ -9,6 +9,31 @@ version: 0.1.0
 ## 用途
 
 將複雜任務分解為可並行執行的子任務，確保每個子任務有明確的職責邊界和可驗證的完成標準。這是 Main Agent 協調工作的核心能力。
+
+## ⛔ MANDATORY: 觸發條件
+
+以下情況 **MUST** 使用此 skill：
+- 涉及 2+ 個檔案
+- 需要 2+ 個 agents
+- 用戶說「實作」、「開發」、「建立」功能
+- 任務複雜度評估為 moderate 或 complex
+
+⛔ BLOCK: 符合以上條件但未執行 task-decomposition，禁止開始實作。
+
+## ⛔ MANDATORY: 分解完成 Checkpoint
+
+完成任務分解後 **MUST** 輸出：
+```
+[CHECKPOINT] Task Decomposition
+├─ 原始請求：[user request summary]
+├─ 複雜度：simple | moderate | complex
+├─ 子任務數量：N
+├─ 涉及 Agents：[agent list]
+├─ 並行群組：N groups
+└─ 下一步：[first subtask]
+```
+
+⛔ BLOCK: 未輸出 decomposition checkpoint 禁止開始實作
 
 ## 核心流程
 

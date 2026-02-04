@@ -803,11 +803,18 @@ async function main() {
     // Hook 呼叫：輸出 hook response
     const displayReport = formatReportForDisplay(report);
     const isBlocking = report.verification_report.status === 'fail';
+    const blockingCount = report.verification_report.blocking_issues?.length || 0;
+
+    // 使用 Forced Eval Pattern 強制語言
+    let systemMessage = displayReport;
+    if (isBlocking) {
+      systemMessage = `⛔ CRITICAL: Verification FAILED - ${blockingCount} blocking issue(s) detected.\n\nMUST fix the following before proceeding:\n${report.verification_report.blocking_issues.map(i => `  - ${i}`).join('\n')}\n\n⛔ BLOCK: 未修復 blocking issues 禁止標記任務完成。\n\n${displayReport}`;
+    }
 
     const output = {
       continue: !isBlocking,
-      stopReason: isBlocking ? 'Verification failed with blocking issues' : undefined,
-      systemMessage: displayReport
+      stopReason: isBlocking ? `⛔ CRITICAL: Verification failed with ${blockingCount} blocking issues` : undefined,
+      systemMessage
     };
 
     console.log(JSON.stringify(output));

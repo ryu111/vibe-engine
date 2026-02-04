@@ -1,6 +1,6 @@
 ---
 name: verification-protocol
-description: This skill should be used when the user asks to "verify code", "run verification", "check if done", "validate changes", or after implementation phase completes. Provides multi-layer verification protocol to ensure task completion.
+description: ⛔ MANDATORY after ANY implementation phase completes. MUST run verification BEFORE marking task as done. CRITICAL - 未執行驗證禁止標記任務完成。
 version: 0.1.0
 ---
 
@@ -9,6 +9,32 @@ version: 0.1.0
 ## 用途
 
 執行多層驗證協議，確保代碼變更符合規格、通過測試、無安全問題。這是閉環驗證的核心能力，防止不完整的任務被標記為完成。
+
+## ⛔ MANDATORY: 觸發條件
+
+以下情況 **MUST** 使用此 skill：
+- 實作階段完成後
+- 用戶說「驗證」、「檢查」、「確認完成」
+- 準備提交 PR 或合併前
+- 任何代碼變更後
+
+⛔ BLOCK: 未執行驗證就標記任務完成，禁止。
+
+## ⛔ MANDATORY: 驗證完成 Checkpoint
+
+執行驗證後 **MUST** 輸出：
+```
+[CHECKPOINT] Verification Complete
+├─ 驗證層級：minimal | standard | thorough
+├─ Static Analysis：PASS | FAIL
+├─ Tests：X passed, Y failed
+├─ Coverage：Z%
+├─ 阻斷問題：N (P0/P1)
+└─ 狀態：APPROVED | BLOCKED
+```
+
+⛔ BLOCK: 未輸出 verification checkpoint 禁止標記任務完成
+⛔ BLOCK: 有 P0 阻斷問題禁止標記任務完成
 
 ## 核心流程
 

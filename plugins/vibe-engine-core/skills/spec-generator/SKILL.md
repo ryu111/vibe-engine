@@ -1,6 +1,6 @@
 ---
 name: spec-generator
-description: This skill should be used when the user asks to "create a spec", "generate specification", "define requirements", "write spec.yaml", or when entering the Specification Phase of development. Provides structured specification generation from natural language.
+description: ⛔ MANDATORY when implementing new features OR when requirements are unclear. MUST generate spec.yaml BEFORE writing any implementation code. CRITICAL - 未生成規格禁止開始編碼。
 version: 0.1.0
 ---
 
@@ -9,6 +9,29 @@ version: 0.1.0
 ## 用途
 
 從自然語言需求生成結構化規格（spec.yaml），作為 SDD+TDD+BDD 開發流程的起點。規格檔案定義了功能的輸入、輸出、完成標準和測試場景。
+
+## ⛔ MANDATORY: 觸發條件
+
+以下情況 **MUST** 使用此 skill：
+- 實作新功能
+- 需求不明確需要澄清
+- 用戶說「create spec」、「定義規格」
+
+⛔ BLOCK: 需求不明確時直接開始編碼，禁止跳過規格生成階段。
+
+### Specification Checkpoint
+
+規格生成完成後 **MUST** 輸出：
+```
+[CHECKPOINT] Specification Complete
+├─ 規格檔案：.vibe-engine/specs/{name}.yaml
+├─ 層級：Level 1 | Level 2 | Level 3
+├─ 完成標準數量：X
+├─ 測試場景數量：X
+└─ 下一步：proceed to implementation
+```
+
+⛔ BLOCK: 未輸出規格 checkpoint 禁止開始實作
 
 ## 核心流程
 

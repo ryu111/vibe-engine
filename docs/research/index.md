@@ -18,6 +18,8 @@
 | 8 | [自主等級](08-autonomy.md) | 何時需要人類介入？ | 🔬 |
 | 9 | [安全權限](09-security.md) | 如何防止 Agent 越權？ | 🔬 |
 | 10 | [開發方法論](10-methodology.md) | AI 開發該用什麼流程？ | 🔬 |
+| ... | ... | ... | ... |
+| 20 | [Forced Eval Pattern](20-forced-eval-pattern.md) | 如何讓 Claude 強制遵循規則？ | ✅ |
 
 **狀態說明**：🔬 研究中 → 📝 有草稿 → ✅ 有解法
 

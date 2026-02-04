@@ -1,6 +1,6 @@
 ---
 name: auto-fix-loop
-description: This skill should be used when tests fail and automatic fixing is needed, when build errors need auto-correction, or when implementing fix-verify-retry loops. Provides automated error correction with verification.
+description: ⛔ MANDATORY when tests fail OR build errors occur. MUST follow fix-verify-retry cycle with max 3 iterations. CRITICAL - 超過 3 次迭代禁止繼續，MUST escalate to user。
 ---
 
 # Auto Fix Loop
@@ -8,6 +8,31 @@ description: This skill should be used when tests fail and automatic fixing is n
 ## Purpose
 
 Implement automated fix-verify-retry cycles when tester or reviewer reports issues, reducing manual intervention.
+
+## ⛔ MANDATORY: 觸發條件
+
+以下情況 **MUST** 使用此 skill：
+- 測試失敗
+- 構建錯誤
+- Lint 錯誤
+- Reviewer 報告問題
+
+⛔ BLOCK: 直接忽略失敗而不嘗試修復，禁止標記任務完成。
+
+## ⛔ MANDATORY: 每次迭代 Checkpoint
+
+每次 fix-verify 迭代後 **MUST** 輸出：
+```
+[CHECKPOINT] Auto-Fix Iteration N/3
+├─ 嘗試修復：[description of fix]
+├─ 修改檔案：[files changed]
+├─ 驗證結果：PASS | FAIL
+├─ 剩餘錯誤：X
+└─ 下一步：continue | escalate
+```
+
+⛔ BLOCK: 未輸出 iteration checkpoint 禁止進入下一迭代
+⛔ BLOCK: 達到 3 次迭代 MUST 立即 escalate，禁止繼續嘗試
 
 ## Core Flow
 

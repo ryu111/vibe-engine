@@ -226,7 +226,7 @@ function handleFailure(state, result) {
   // Check if we've exceeded max iterations
   if (state.active && state.iteration >= CONFIG.maxAutoFixIterations) {
     return {
-      systemMessage: `[Auto-Fix Loop] ❌ Max iterations (${CONFIG.maxAutoFixIterations}) exceeded. Escalating to user.`,
+      systemMessage: `⛔ MANDATORY STOP: Auto-fix loop exceeded max iterations (${CONFIG.maxAutoFixIterations}).\n\n⛔ BLOCK: Further auto-fix attempts are FORBIDDEN.\n\nMUST escalate to user with full diagnosis report. Do NOT attempt additional fixes without user guidance.\n\n${generateEscalationReport(state, result)}`,
       escalate: true,
       escalationReport: generateEscalationReport(state, result),
       stateUpdate: { ...DEFAULT_STATE }
@@ -238,7 +238,7 @@ function handleFailure(state, result) {
 
   if (!fixability.canAutoFix) {
     return {
-      systemMessage: '[Error Handler] ❌ Errors detected but not auto-fixable. Escalating.',
+      systemMessage: `⛔ CRITICAL: Errors detected but not auto-fixable.\n\nError types found:\n${result.errors.map(e => `  - ${e.type}: ${e.count} issue(s)`).join('\n')}\n\n⛔ BLOCK: Auto-fix not possible. MUST escalate to user for manual intervention.`,
       escalate: true,
       stateUpdate: state
     };
@@ -264,8 +264,16 @@ function handleFailure(state, result) {
 
   const plan = generateAutoFixPlan(state, result);
 
+  // Generate checkpoint message for iteration
+  const checkpointMessage = `
+[CHECKPOINT] Auto-Fix Iteration ${newState.iteration}/${CONFIG.maxAutoFixIterations}
+├─ 嘗試修復：${plan.steps.map(s => s.task.substring(0, 30)).join(', ')}
+├─ 錯誤類型：${result.errors.map(e => e.type).join(', ')}
+├─ 錯誤數量：${result.errors.reduce((sum, e) => sum + e.count, 0)}
+└─ 下一步：execute fix plan`;
+
   return {
-    systemMessage: `[Auto-Fix Loop] 🔄 Iteration ${newState.iteration}/${CONFIG.maxAutoFixIterations}: Attempting automatic fix`,
+    systemMessage: `[Auto-Fix Loop] 🔄 Iteration ${newState.iteration}/${CONFIG.maxAutoFixIterations}\n\n**MUST** output checkpoint after fix attempt:\n${checkpointMessage}\n\n⛔ BLOCK: 未輸出 iteration checkpoint 禁止進入下一迭代`,
     autoFixPlan: plan,
     stateUpdate: newState
   };

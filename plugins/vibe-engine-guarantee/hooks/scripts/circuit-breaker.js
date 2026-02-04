@@ -93,7 +93,7 @@ function checkCircuit() {
 
       return {
         decision: 'BLOCK',
-        message: `[Circuit Breaker] Circuit is OPEN due to repeated failures. Waiting ${remainingSec}s before retry.`
+        message: `⛔ BLOCK: Circuit Breaker is OPEN due to ${state.failures} repeated failures. ⛔ CRITICAL: All operations blocked for ${remainingSec}s. MUST wait for cooldown or fix underlying issues.`
       };
     }
   }

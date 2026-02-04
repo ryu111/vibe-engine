@@ -1,6 +1,6 @@
 ---
 name: error-recovery
-description: This skill should be used when an error occurs, when a task fails, when retry logic is needed, or when rollback/compensation is required. Provides error classification, retry strategies, and Saga compensation patterns.
+description: ⛔ MANDATORY when errors occur during task execution. MUST classify error type and determine recovery strategy BEFORE attempting any retry. CRITICAL - 未執行錯誤分類禁止直接重試。
 ---
 
 # Error Recovery
@@ -8,6 +8,43 @@ description: This skill should be used when an error occurs, when a task fails, 
 ## Purpose
 
 Provide systematic error handling with classification, retry strategies, and compensation patterns.
+
+## ⛔ MANDATORY: 觸發條件
+
+以下情況 **MUST** 使用此 skill：
+- 任務執行過程中發生錯誤
+- 需要重試失敗的操作
+- 需要回滾或補償操作
+
+⛔ BLOCK: 發生錯誤後直接重試而未先分類，禁止繼續操作。
+
+## 強制流程
+
+### Phase 1: 錯誤分類
+
+執行完成後 **MUST** 輸出：
+```
+[CHECKPOINT] Error Classification
+├─ 錯誤類型：transient | compensatable | logic | irreversible
+├─ 匹配模式：[specific pattern]
+├─ 恢復策略：retry | rollback | fix | escalate
+└─ 下一步：[specific action]
+```
+
+⛔ BLOCK: 未輸出分類 checkpoint 禁止執行恢復策略
+
+### Phase 2: 執行恢復
+
+根據分類執行對應策略後 **MUST** 輸出：
+```
+[CHECKPOINT] Recovery Execution
+├─ 策略：[executed strategy]
+├─ 嘗試次數：X/Y
+├─ 結果：SUCCESS | FAILED | ESCALATED
+└─ 下一步：[continue | retry | escalate]
+```
+
+⛔ BLOCK: 超過最大重試次數 MUST 立即 escalate
 
 ## Core Flow
 

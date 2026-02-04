@@ -3,6 +3,7 @@
 複製此模板到 `skills/{skill-name}/SKILL.md`。
 
 > **來源**：[Claude Code 官方文檔 - Extend Claude with skills](https://code.claude.com/docs/en/skills)
+> **重要**：請先閱讀 [Ch20: Forced Eval Pattern](../research/20-forced-eval-pattern.md) 了解如何寫出高觸發率的 skill
 
 ---
 
@@ -23,7 +24,7 @@
 
 ---
 
-## 基本模板
+## 基本模板（弱語言版，20% 成功率）
 
 ```markdown
 ---
@@ -49,33 +50,92 @@ description: This skill should be used when the user asks to "trigger phrase 1",
 - [Rule 1: 必須遵守的規則]
 - [Rule 2: 必須遵守的規則]
 - [Rule 3: 限制或約束]
+```
+
+---
+
+## ⭐ Forced Eval 模板（強制語言版，84% 成功率）
+
+> 詳見 [Ch20: Forced Eval Pattern](../research/20-forced-eval-pattern.md)
+
+```markdown
+---
+name: skill-name-here
+description: ⛔ MANDATORY when [condition 1] OR [condition 2]. MUST be activated BEFORE [action]. CRITICAL - 未執行此 skill 禁止 [blocked action]。
+---
+
+# [Skill Name]
+
+## ⛔ MANDATORY: 觸發條件
+
+以下情況 **MUST** 使用此 skill：
+- [Condition 1]
+- [Condition 2]
+- [Condition 3]
+
+⛔ BLOCK: 符合以上條件但未執行此 skill，禁止 [blocked action]。
+
+## 強制流程
+
+### Phase 1: [Phase Name]
+
+執行完成後 **MUST** 輸出：
+```
+[CHECKPOINT] Phase 1: [Phase Name]
+├─ 已完成：[specific items]
+├─ 結果：[metrics/values]
+└─ 下一步：[next action]
+```
+
+⛔ BLOCK: 未輸出 Phase 1 checkpoint 禁止進入 Phase 2
+
+### Phase 2: [Phase Name]
+
+執行完成後 **MUST** 輸出：
+```
+[CHECKPOINT] Phase 2: [Phase Name]
+├─ 已完成：[specific items]
+├─ 進度：X/N (Y%)
+└─ 下一步：[next action]
+```
+
+⛔ BLOCK: [blocking condition] 禁止進入 Phase 3
+
+### Phase N: [Final Phase]
+
+執行完成後 **MUST** 輸出：
+```
+[CHECKPOINT] [Skill Name] Complete
+├─ 總結：[summary]
+├─ 驗證：[pass/fail]
+└─ 下一步：[next action or "proceed to implementation"]
+```
+
+## 阻斷條件摘要
+
+| 條件 | 阻斷動作 |
+|------|----------|
+| 未輸出 Phase 1 checkpoint | ⛔ 禁止進入 Phase 2 |
+| 未輸出 Phase 2 checkpoint | ⛔ 禁止進入 Phase 3 |
+| [Custom condition] | ⛔ 禁止 [action] |
 
 ## 快速參考
 
 | 場景 | 行為 |
 |------|------|
-| [Scenario 1] | [Action] |
-| [Scenario 2] | [Action] |
-| [Scenario 3] | [Action] |
-
-## 腳本與工具
-
-| 腳本 | 用途 |
-|------|------|
-| `scripts/[name].sh` | [Description] |
-| `scripts/[name].ts` | [Description] |
-
-執行方式：
-\`\`\`bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/[skill-name]/scripts/[script].sh [args]
-\`\`\`
-
-## 更多資訊
-
-- 詳細說明見 `references/[topic].md`
-- 範例見 `examples/`
-- 工具腳本見 `scripts/`
+| [Scenario 1] | MUST [Action] |
+| [Scenario 2] | MUST [Action] |
+| [Scenario 3] | ⛔ BLOCK [Action] |
 ```
+
+### Forced Eval 關鍵要素
+
+| 要素 | 弱語言 ❌ | 強制語言 ✅ |
+|------|----------|------------|
+| 觸發條件 | "should be used when" | "⛔ MANDATORY when" |
+| 輸出要求 | "輸出結果" | "MUST 輸出 [CHECKPOINT]" |
+| 阻斷條件 | "應該先完成" | "⛔ BLOCK: 未完成禁止" |
+| 數值門檻 | "盡量達到 80%" | "⛔ BLOCK: < 80% 禁止" |
 
 ---
 

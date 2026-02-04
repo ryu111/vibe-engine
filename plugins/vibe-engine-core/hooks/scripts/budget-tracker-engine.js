@@ -639,8 +639,13 @@ async function main() {
         }
       };
 
-      // 警報時添加系統訊息
-      if (alert.level !== 'normal') {
+      // 警報時添加系統訊息 - 使用 Forced Eval Pattern 強制語言
+      if (alert.level === 'exceeded') {
+        output.systemMessage = `⛔ MANDATORY STOP: Budget exhausted (${Math.round(budgetUsage.overall * 100)}%). ⛔ BLOCK all further operations until budget reset or user approval.`;
+        output.continue = false;
+      } else if (alert.level === 'urgent') {
+        output.systemMessage = `⛔ CRITICAL: Budget nearly exhausted (${Math.round(budgetUsage.overall * 100)}%). MUST create checkpoint immediately. Consider stopping or downgrading model.`;
+      } else if (alert.level !== 'normal') {
         output.systemMessage = `[Budget Tracker] ${alert.icon} ${alert.message} (${Math.round(budgetUsage.overall * 100)}%)`;
       }
 

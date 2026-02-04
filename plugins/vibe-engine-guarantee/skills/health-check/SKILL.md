@@ -1,6 +1,7 @@
 ---
 name: health-check
-description: This skill should be used when checking code health, measuring complexity, detecting duplication, or assessing maintainability. Provides code quality metrics and health scores.
+description: ⛔ MANDATORY before creating PR OR when health_score drops below 70. MUST run health check and report metrics. CRITICAL - health score < 60 禁止提交 PR。
+version: 0.1.0
 ---
 
 # Health Check
@@ -8,6 +9,31 @@ description: This skill should be used when checking code health, measuring comp
 ## Purpose
 
 Measure and report code health metrics to identify potential quality issues before they become problems.
+
+## ⛔ MANDATORY: 觸發條件
+
+以下情況 **MUST** 使用此 skill：
+- 準備提交 PR 前
+- 大型重構後
+- 用戶說「檢查健康度」、「代碼品質」
+- 定期維護檢查
+
+⛔ BLOCK: Health score < 60 禁止提交 PR（需要先修復 critical issues）
+
+## ⛔ MANDATORY: 健康檢查 Checkpoint
+
+執行健康檢查後 **MUST** 輸出：
+```
+[CHECKPOINT] Health Check Complete
+├─ Overall Score：X/100 (Grade: A-F)
+├─ Complexity：🟢|🟡|🔴 (avg: X)
+├─ Duplication：🟢|🟡|🔴 (X%)
+├─ Critical Issues：N
+└─ 狀態：HEALTHY | WARNING | CRITICAL
+```
+
+⛔ BLOCK: 未輸出 health check checkpoint 禁止標記檢查完成
+⛔ BLOCK: 狀態為 CRITICAL 禁止提交 PR
 
 ## Core Metrics
 

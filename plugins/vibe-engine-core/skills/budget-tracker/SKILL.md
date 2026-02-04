@@ -1,6 +1,6 @@
 ---
 name: budget-tracker
-description: This skill should be used when the user asks to "check budget", "track tokens", "monitor cost", "view usage", or when making decisions about model selection and resource allocation. Provides token and cost budget tracking with automatic model routing.
+description: ⛔ MANDATORY for ALL tool use operations. MUST track token/cost before and after each operation. CRITICAL - 預算超過 100% 禁止繼續操作，MUST 暫停並詢問用戶。
 version: 0.1.0
 ---
 
@@ -9,6 +9,26 @@ version: 0.1.0
 ## 用途
 
 追蹤和管理 token/成本預算，在資源緊張時自動調整策略。支援預算警報、模型路由、和優雅降級。
+
+## ⛔ CRITICAL: 預算控制
+
+- **MANDATORY**: 每次 tool use 前必須檢查預算
+- **⛔ BLOCK**: 預算用盡 (exceeded) 時禁止繼續執行
+- **MUST**: 超過警告閾值時輸出警告
+
+### 預算警報 Checkpoint
+
+當預算使用超過閾值時 **MUST** 輸出：
+```
+[CHECKPOINT] Budget Warning
+├─ 使用率：X%
+├─ 警報等級：warning | urgent | exceeded
+├─ 已消耗：X tokens / $X
+├─ 剩餘：X tokens / $X
+└─ 建議：[model downgrade | checkpoint | stop]
+```
+
+⛔ BLOCK: 使用率 >= 100% 時禁止任何非安全操作
 
 ## 核心流程
 

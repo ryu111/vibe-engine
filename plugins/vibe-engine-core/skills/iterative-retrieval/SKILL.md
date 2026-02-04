@@ -1,6 +1,6 @@
 ---
 name: iterative-retrieval
-description: This skill should be used when the user asks to "gather context", "explore codebase", "find relevant files", or when SubAgents need to understand code they haven't seen before. Provides progressive context refinement for agents unfamiliar with the codebase.
+description: ⛔ MANDATORY when SubAgent needs to understand unfamiliar code OR context is insufficient for task. MUST complete context gathering BEFORE starting implementation. CRITICAL - context 不足禁止直接實作。
 version: 0.1.0
 ---
 
@@ -9,6 +9,31 @@ version: 0.1.0
 ## 用途
 
 為 SubAgents 提供漸進式 context 收集，解決「不知道需要什麼就無法搜索」的問題。通過多輪迭代逐步精煉 context，直到有足夠資訊完成任務。
+
+## ⛔ MANDATORY: 觸發條件
+
+以下情況 **MUST** 使用此 skill：
+- SubAgent 首次接觸某模組
+- 任務涉及不熟悉的代碼區域
+- 初次搜索結果不足以理解問題
+- 用戶說「探索」、「了解」、「收集 context」
+
+⛔ BLOCK: Context 不足就開始實作，禁止。
+
+## ⛔ MANDATORY: 每輪迭代 Checkpoint
+
+每次迭代後 **MUST** 輸出：
+```
+[CHECKPOINT] Retrieval Iteration N/3
+├─ 策略：broad_search | targeted_search | precise_lookup
+├─ 搜索詞：[queries]
+├─ 發現檔案：N files
+├─ Context 評估：sufficient | insufficient
+└─ 下一步：continue | ready_to_execute
+```
+
+⛔ BLOCK: 未輸出 iteration checkpoint 禁止進入下一輪
+⛔ BLOCK: 達到 3 次迭代仍不足，MUST 回報並請求指導
 
 ## 核心流程（最多 3 次迭代）
 

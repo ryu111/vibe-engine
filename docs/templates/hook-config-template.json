@@ -2,18 +2,20 @@
   "_comment": "Hook 配置模板 - 複製到 hooks/hooks.json",
   "_note": "刪除所有 _comment 和 _note 欄位後使用",
   "_important": "所有 command hooks 使用 Node.js 確保跨平台相容性",
+  "_forced_eval": "詳見 Ch20: Forced Eval Pattern - 在阻斷決策時使用 MANDATORY/CRITICAL/⛔ BLOCK 語言可提高遵循率從 20% 到 84%",
 
   "description": "Plugin hooks description",
   "hooks": {
     "_comment_PreToolUse": "工具執行前觸發，可阻擋或修改操作",
+    "_forced_eval_tip": "阻斷時使用強制語言：⛔ BLOCK: [reason]. MUST [action] before proceeding.",
     "PreToolUse": [
       {
-        "_comment": "Prompt-based hook 範例（推薦用於複雜邏輯）",
+        "_comment": "Prompt-based hook 範例（推薦用於複雜邏輯）- 使用強制語言",
         "matcher": "Edit|Write|Bash",
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "檢查操作是否安全。回覆 JSON: {\"decision\": \"allow|deny\", \"reason\": \"...\"}",
+            "prompt": "⛔ MANDATORY: 檢查操作安全性。回覆 JSON: {\"decision\": \"allow|deny\", \"reason\": \"...\"}。如果 deny，systemMessage MUST 使用格式：⛔ BLOCK: [reason]",
             "timeout": 10
           }
         ]
@@ -46,13 +48,14 @@
     ],
 
     "_comment_Stop": "Agent 準備停止時觸發，可阻擋或執行收尾工作",
+    "_forced_eval_tip_stop": "阻斷時使用：⛔ CRITICAL: Verification FAILED. MUST fix [issues] before completion.",
     "Stop": [
       {
         "matcher": "*",
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "驗證任務是否完成。回覆 JSON: {\"decision\": \"approve|block\", \"reason\": \"...\"}",
+            "prompt": "⛔ MANDATORY: 驗證任務完成狀態。檢查：1) 所有子任務完成 2) 測試通過 3) 無未處理錯誤。回覆 JSON: {\"decision\": \"approve|block\", \"reason\": \"...\"}。如果 block，systemMessage MUST 使用格式：⛔ CRITICAL: [blocking issues]. MUST [required actions].",
             "timeout": 15
           }
         ]

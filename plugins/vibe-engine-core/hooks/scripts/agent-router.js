@@ -474,15 +474,26 @@ async function main() {
   const taskDecomposition = getLatestTaskDecomposition();
 
   if (!taskDecomposition) {
-    // 沒有任務分解，使用建議的 agent
+    // 沒有任務分解，檢查是否需要
+    const isComplex = classification.complexity === 'moderate' || classification.complexity === 'complex';
     const suggestedAgent = classification.suggestedAgent || 'developer';
+
+    let systemMessage;
+    if (isComplex) {
+      // 複雜任務但沒有任務分解 - 使用強制語言
+      systemMessage = `⛔ CRITICAL: Complex task detected but no task decomposition found.\n\n**MUST** use task-decomposition skill BEFORE starting implementation.\n\nSuggested workflow:\n1. Use task-decomposition skill to break down the task\n2. Follow the generated routing plan\n3. Execute subtasks according to dependency order\n\n⛔ BLOCK: 複雜任務未經分解禁止直接實作。`;
+    } else {
+      systemMessage = `[Agent Router] Routing to ${suggestedAgent} agent for this request.`;
+    }
+
     const output = {
       continue: true,
       suppressOutput: false,
-      systemMessage: `[Agent Router] 建議使用 ${suggestedAgent} agent 處理此請求。`,
+      systemMessage,
       hookSpecificOutput: {
         routing: 'single',
-        agent: suggestedAgent
+        agent: suggestedAgent,
+        needsDecomposition: isComplex
       }
     };
     console.log(JSON.stringify(output));

@@ -90,12 +90,14 @@ process.stdin.on('end', () => {
       }
     };
 
+    // 使用 Forced Eval Pattern 強制語言
     if (decision === 'deny') {
-      output.systemMessage = `[Permission Guard] BLOCKED: ${reason}`;
+      output.continue = false;  // 阻止操作
+      output.systemMessage = `⛔ BLOCK: ${reason}. This operation is FORBIDDEN and has been blocked. MUST NOT attempt to bypass this security check.`;
     } else if (decision === 'ask') {
-      output.systemMessage = `[Permission Guard] Requires confirmation: ${reason}`;
+      output.systemMessage = `⛔ CRITICAL: ${reason}. MUST get explicit user approval before proceeding. Do NOT modify sensitive files without confirmation.`;
     } else if (warnings.length > 0) {
-      output.systemMessage = `[Permission Guard] Warnings: ${warnings.join('; ')}`;
+      output.systemMessage = `[Permission Guard] ⚠️ Warnings: ${warnings.join('; ')}`;
     }
 
     console.log(JSON.stringify(output));
