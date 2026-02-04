@@ -80,19 +80,19 @@ process.stdin.on('end', () => {
       }
     }
 
-    // 輸出決定
+    // 輸出決定（PreToolUse hook 格式）
     const output = {
-      continue: true,
+      continue: decision !== 'deny',  // deny 時阻止，ask 時繼續但顯示訊息
       suppressOutput: false,
       hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
         permissionDecision: decision,
-        reason: reason
+        permissionDecisionReason: reason
       }
     };
 
     // 使用 Forced Eval Pattern 強制語言
     if (decision === 'deny') {
-      output.continue = false;  // 阻止操作
       output.systemMessage = `⛔ BLOCK: ${reason}. This operation is FORBIDDEN and has been blocked. MUST NOT attempt to bypass this security check.`;
     } else if (decision === 'ask') {
       output.systemMessage = `⛔ CRITICAL: ${reason}. MUST get explicit user approval before proceeding. Do NOT modify sensitive files without confirmation.`;
@@ -108,7 +108,9 @@ process.stdin.on('end', () => {
       continue: true,
       suppressOutput: false,
       hookSpecificOutput: {
-        permissionDecision: 'allow'
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+        permissionDecisionReason: error.message
       }
     }));
   }
