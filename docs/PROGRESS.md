@@ -106,11 +106,29 @@
 
 ## 下一步
 
+### 已完成
 - [x] 實作四大核心引擎
 - [x] 建立 vibe-engine-guarantee plugin
 - [x] 應用 Forced Eval Pattern 到所有組件
-- [ ] 在其他專案測試載入
-- [ ] 建立 vibe-engine-memory plugin
+- [x] Hook 腳本執行驗證（5/5 通過）
+
+### 待完成（按優先級）
+1. [ ] **P1**: 在其他專案測試載入（載入測試）
+2. [ ] **P1**: 建立 vibe-engine-memory plugin（Ch5 記憶系統）
+3. [ ] **P2**: 建立 vibe-engine-dashboard plugin（Ch7 TUI Dashboard）
+4. [ ] **P2**: 建立 vibe-engine-learning plugin（Ch5 Instinct Learning）
+
+---
+
+## Hook 執行驗證結果
+
+| Hook | 測試場景 | 結果 |
+|------|----------|------|
+| permission-guard.js | rm -rf, git reset, .env, npm install | ✅ 4/4 |
+| circuit-breaker.js | CLOSED, OPEN, HALF_OPEN states | ✅ 3/3 |
+| verification-engine.js | Report generation | ✅ 1/1 |
+| budget-tracker-engine.js | Code logic verification | ✅ 1/1 |
+| error-handler.js | Auto-fix plan, max iterations | ✅ 2/2 |
 
 ---
 

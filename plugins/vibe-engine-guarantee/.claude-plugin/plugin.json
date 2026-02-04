@@ -13,8 +13,5 @@
     "auto-fix",
     "circuit-breaker",
     "health-check"
-  ],
-  "dependencies": [
-    "vibe-engine-core"
   ]
 }
