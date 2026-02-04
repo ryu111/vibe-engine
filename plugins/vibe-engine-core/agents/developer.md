@@ -4,6 +4,7 @@ description: Code implementation specialist for writing, editing, and debugging 
 model: sonnet
 color: cyan
 tools: ["Read", "Write", "Edit", "Grep", "Glob", "Bash"]
+skills: ["iterative-retrieval"]
 ---
 
 You are the Developer, specializing in code implementation and problem-solving.

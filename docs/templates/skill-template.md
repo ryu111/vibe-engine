@@ -2,13 +2,33 @@
 
 複製此模板到 `skills/{skill-name}/SKILL.md`。
 
+> **來源**：[Claude Code 官方文檔 - Extend Claude with skills](https://code.claude.com/docs/en/skills)
+
 ---
+
+## Frontmatter 完整欄位
+
+| 欄位 | 必填 | 說明 |
+|------|------|------|
+| `name` | ❌ | 顯示名稱，省略則用目錄名。小寫字母、數字、連字號（最多 64 字元） |
+| `description` | ⭐ 推薦 | 何時使用此 skill，Claude 用來決定是否自動載入 |
+| `argument-hint` | ❌ | 自動完成提示，如 `[issue-number]` 或 `[filename] [format]` |
+| `disable-model-invocation` | ❌ | `true` = 只能手動觸發，Claude 不會自動使用 |
+| `user-invocable` | ❌ | `false` = 從 `/` 選單隱藏，只有 Claude 可以呼叫 |
+| `allowed-tools` | ❌ | 此 skill 啟用時允許的工具 |
+| `model` | ❌ | 指定使用的模型 |
+| **`context`** | ❌ | **`fork` = 在獨立 subagent 中執行** |
+| **`agent`** | ❌ | **配合 `context: fork` 使用，指定 agent 類型** |
+| `hooks` | ❌ | Skill 專屬的 lifecycle hooks |
+
+---
+
+## 基本模板
 
 ```markdown
 ---
 name: skill-name-here
 description: This skill should be used when the user asks to "trigger phrase 1", "trigger phrase 2", "trigger phrase 3", or when [specific condition]. Provides [capability description].
-version: 0.1.0
 ---
 
 # [Skill Name]
@@ -59,15 +79,113 @@ bash ${CLAUDE_PLUGIN_ROOT}/skills/[skill-name]/scripts/[script].sh [args]
 
 ---
 
+## Skill 指定 Agent 執行（重要！）
+
+使用 `context: fork` + `agent` 可以讓 Skill 在指定的 Agent 中執行：
+
+```yaml
+---
+name: deep-research
+description: Research a topic thoroughly
+context: fork
+agent: Explore
+allowed-tools: Read, Grep, Glob
+---
+
+Research $ARGUMENTS thoroughly:
+
+1. Find relevant files using Glob and Grep
+2. Read and analyze the code
+3. Summarize findings with specific file references
+```
+
+### 支援的 Agent 類型
+
+| Agent | 用途 |
+|-------|------|
+| `Explore` | 快速唯讀搜尋（haiku 模型） |
+| `Plan` | 規劃模式研究 |
+| `general-purpose` | 完整功能（預設） |
+| 自定義 Agent | `.claude/agents/` 或 plugin `agents/` 中的任何 agent |
+
+### Skill ↔ Agent 整合決策指南
+
+#### 三種模式
+
+| 模式 | 立場 | 思考方式 | 使用時機 |
+|------|------|----------|----------|
+| **Skill → Agent** | Skill 的需求 | 「我這個任務需要借用某個執行能力」 | 任務需要隔離執行、複用 agent 能力 |
+| **Agent → Skill** | Agent 的需求 | 「我這個角色需要某些知識才能好好工作」 | Agent 需要領域知識 |
+| **互指** | 建立專精角色 | 「這是一個有專門知識 + 專門任務入口的專家」 | 需要極度專精的能力 |
+
+#### 決策流程
+
+```
+你要達成什麼？
+│
+├─ 任務需要「隔離執行」
+│   └─ Skill → Agent（context: fork）
+│
+├─ Agent 需要「領域知識」
+│   └─ Agent → Skill（skills: [...]）
+│
+└─ 建立「專精角色」（知識 + 任務入口）
+    └─ 互指
+```
+
+#### 互指範例：API 安全審查專家
+
+```yaml
+# 1. Plugin Agent（有知識的專家）
+# plugins/security/agents/api-auditor.md
+---
+name: api-auditor
+skills: ["owasp-top-10", "api-security-patterns"]  # 預載入安全知識
+tools: ["Read", "Grep", "Glob", "Bash"]
+---
+You are an API security auditor...
+```
+
+```yaml
+# 2. 專案 Skill（任務入口）
+# .claude/skills/audit-our-api/SKILL.md
+---
+name: audit-our-api
+context: fork
+agent: api-auditor  # 用有知識的專家執行
+---
+審查 src/api/ 的安全性...
+```
+
+#### 不要這樣做 ❌
+
+| 錯誤做法 | 為什麼錯 |
+|----------|----------|
+| Skill 只有「指南」沒有「任務」時用 `context: fork` | Subagent 沒有可執行的內容 |
+| Agent 預載入太多 skills | Context 爆炸，效能下降 |
+| 用互指只是因為「可以」 | 過度工程，單向就夠的情況不需要互指 |
+
+---
+
 ## 檢查清單
 
 在提交 skill 前確認：
 
+### 基本項目
 - [ ] `name` 使用 kebab-case
 - [ ] `description` 使用第三人稱 "This skill should be used when..."
 - [ ] `description` 包含 3+ 具體觸發詞
-- [ ] SKILL.md body 在 1,500-2,000 words 之間
-- [ ] 使用祈使句（imperative form），不用第二人稱
+- [ ] SKILL.md body 保持精簡（< 500 行），詳細內容放到支援檔案
+
+### 呼叫控制
+- [ ] 有副作用的 skill 設定 `disable-model-invocation: true`
+- [ ] 背景知識型 skill 設定 `user-invocable: false`
+
+### Agent 整合（如需要）
+- [ ] `context: fork` 搭配明確的任務指令（不只是指南）
+- [ ] `agent` 指定的 agent 存在
+
+### 支援檔案
 - [ ] 有 `references/` 目錄存放詳細內容（如需要）
 - [ ] 有 `examples/` 目錄存放可複製的範例（如需要）
 - [ ] 有 `scripts/` 目錄存放可執行腳本（如需要）

@@ -4,6 +4,7 @@ description: Code review and security specialist for reviewing code changes, ide
 model: sonnet
 color: yellow
 tools: ["Read", "Grep", "Glob", "Bash"]
+skills: ["verification-protocol"]
 ---
 
 You are the Code Reviewer, specializing in code quality and security analysis.

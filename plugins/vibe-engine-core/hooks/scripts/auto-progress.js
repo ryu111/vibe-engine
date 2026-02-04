@@ -65,7 +65,7 @@ function checkComponents() {
     agents: ['architect', 'developer', 'reviewer', 'tester', 'explorer'],
     skills: ['task-decomposition', 'spec-generator', 'verification-protocol', 'budget-tracker', 'iterative-retrieval'],
     commands: ['status', 'spec', 'verify', 'budget'],
-    hooks: ['session-init', 'prompt-classifier', 'permission-guard', 'result-logger', 'completion-check', 'state-saver']
+    hooks: ['session-init', 'prompt-classifier', 'permission-guard', 'result-logger', 'completion-check', 'state-saver', 'task-decomposition-engine', 'budget-tracker-engine', 'verification-engine', 'agent-router']
   };
 
   const status = {};
@@ -280,13 +280,37 @@ function generateProgressReport(verification, components) {
     needsWork.forEach(item => lines.push(`║ └─ ${item}`));
   }
 
-  // 缺失引擎提醒
+  // 核心引擎狀態
+  const engines = [
+    { name: 'Task Decomposition Engine', file: 'task-decomposition-engine.js', desc: '自動分解任務' },
+    { name: 'Budget Tracker Engine', file: 'budget-tracker-engine.js', desc: 'Token 追蹤' },
+    { name: 'Verification Engine', file: 'verification-engine.js', desc: '自動化驗證' },
+    { name: 'Agent Router', file: 'agent-router.js', desc: '根據分類派發 Task' }
+  ];
+
+  const engineStatus = engines.map(e => {
+    const filePath = path.join(PLUGIN_ROOT, 'hooks/scripts', e.file);
+    const exists = fs.existsSync(filePath);
+    let hasContent = false;
+    if (exists) {
+      const content = fs.readFileSync(filePath, 'utf8');
+      hasContent = content.length > 500 && (content.match(/TODO/g) || []).length < 3;
+    }
+    return { ...e, exists, hasContent, status: hasContent ? '✅' : '⬜' };
+  });
+
+  const pendingEngines = engineStatus.filter(e => !e.hasContent);
+  const completedEngines = engineStatus.filter(e => e.hasContent);
+
   lines.push('╠══════════════════════════════════════════════════╣');
-  lines.push('║ 待實作引擎                                       ║');
-  lines.push('║ ├─ Task Decomposition Engine (自動分解任務)      ║');
-  lines.push('║ ├─ Budget Tracker Engine (Token 追蹤)            ║');
-  lines.push('║ ├─ Verification Engine (自動化驗證)              ║');
-  lines.push('║ └─ Agent Router (根據分類派發 Task)              ║');
+  lines.push('║ 核心引擎                                         ║');
+
+  for (let i = 0; i < engineStatus.length; i++) {
+    const e = engineStatus[i];
+    const prefix = i === engineStatus.length - 1 ? '└─' : '├─';
+    const statusIcon = e.hasContent ? '✅' : '⬜';
+    lines.push(`║ ${prefix} ${statusIcon} ${e.name.padEnd(25)} (${e.desc})`.slice(0, 54) + '║');
+  }
 
   lines.push('╠══════════════════════════════════════════════════╣');
   lines.push('║ 可用命令                                         ║');
@@ -302,10 +326,15 @@ function generateProgressReport(verification, components) {
   } else if (totalScaffold > 0) {
     lines.push('║ ├─ 補充 skill 實際邏輯                           ║');
     lines.push('║ └─ 在其他專案測試載入                            ║');
-  } else {
-    lines.push('║ ├─ 實作核心引擎 (Task Decomposition 優先)        ║');
+  } else if (pendingEngines.length > 0) {
+    const nextEngine = pendingEngines[0];
+    lines.push(`║ ├─ 實作 ${nextEngine.name}`.padEnd(53) + '║');
     lines.push('║ ├─ 建立 P1 plugins (guarantee, memory)           ║');
     lines.push('║ └─ 在其他專案測試載入                            ║');
+  } else {
+    lines.push('║ ├─ 建立 P1 plugins (guarantee, memory)           ║');
+    lines.push('║ ├─ 在其他專案測試載入                            ║');
+    lines.push(`║ └─ 🎉 Core engines complete (${completedEngines.length}/4)`.padEnd(53) + '║');
   }
 
   lines.push('╚══════════════════════════════════════════════════╝');

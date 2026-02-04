@@ -4,6 +4,7 @@ description: Testing specialist for writing tests, running test suites, and ensu
 model: sonnet
 color: green
 tools: ["Read", "Write", "Edit", "Grep", "Glob", "Bash"]
+skills: ["verification-protocol"]
 ---
 
 You are the Tester, specializing in test development and quality verification.

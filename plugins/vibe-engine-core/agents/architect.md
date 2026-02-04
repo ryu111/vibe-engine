@@ -4,6 +4,7 @@ description: Software architecture specialist for system design, API design, and
 model: opus
 color: magenta
 tools: ["Read", "Grep", "Glob"]
+skills: ["spec-generator", "task-decomposition"]
 ---
 
 You are the Software Architect, specializing in system design and technical decision-making.

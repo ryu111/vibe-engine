@@ -128,9 +128,74 @@ After completing your task, provide:
 
 ## 可選欄位
 
+> **來源**：[Claude Code 官方文檔 - Create custom subagents](https://code.claude.com/docs/en/sub-agents)
+
 | 欄位 | 用途 | 範例 |
 |------|------|------|
-| `tools` | 限制可用工具（最小權限原則） | `["Read", "Grep"]` |
+| `tools` | 允許的工具列表（allowlist） | `["Read", "Grep", "Glob"]` |
+| `disallowedTools` | 禁止的工具列表（denylist） | `["Write", "Edit"]` |
+| `skills` | **預載入 Skills 到 Agent context** | `["api-conventions", "error-handling"]` |
+| `hooks` | **Agent 專屬的 lifecycle hooks** | 見下方範例 |
+| `permissionMode` | 權限模式 | `default`, `acceptEdits`, `dontAsk`, `bypassPermissions`, `plan` |
+
+### Skills 欄位（重要！）
+
+Skills 欄位會在 Agent 啟動時**注入 skill 內容**到 context，讓 Agent 擁有領域知識而不需執行時才載入：
+
+```yaml
+---
+name: api-developer
+description: Implement API endpoints following team conventions
+skills:
+  - api-conventions
+  - error-handling-patterns
+---
+
+Implement API endpoints. Follow the conventions and patterns from the preloaded skills.
+```
+
+**注意**：
+- Subagents **不會**從 parent conversation 繼承 skills，必須明確列出
+- Skills 內容會被完整注入，不只是讓 agent 可以呼叫
+
+### Skill ↔ Agent 整合決策
+
+| 模式 | 立場 | 使用時機 |
+|------|------|----------|
+| **Agent → Skill** | Agent 的需求 | 「我這個角色需要某些知識才能好好工作」 |
+| **Skill → Agent** | Skill 的需求 | 「我這個任務需要借用某個執行能力」 |
+| **互指** | 建立專精角色 | 「這是一個有專門知識 + 專門任務入口的專家」 |
+
+詳細決策指南見 [skill-template.md](skill-template.md#skill--agent-整合決策指南)。
+
+### Hooks 欄位
+
+Agent 可以定義專屬的 lifecycle hooks，只在該 Agent 執行時生效：
+
+```yaml
+---
+name: db-reader
+description: Execute read-only database queries
+tools: ["Bash"]
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: "./scripts/validate-readonly-query.sh"
+---
+```
+
+支援的 Hook Events：
+- `PreToolUse` - Agent 使用工具前
+- `PostToolUse` - Agent 使用工具後
+- `Stop` - Agent 結束時（會轉換為 `SubagentStop`）
+
+### MCP 工具繼承
+
+> 預設情況下，Subagents 會繼承 main conversation 的所有工具，**包括 MCP tools**。
+
+若要限制 MCP 工具，使用 `tools` 或 `disallowedTools` 欄位。
 
 ## Tools 最佳實踐（最小權限原則）
 
@@ -162,14 +227,27 @@ After completing your task, provide:
 
 ## 檢查清單
 
+### 必填項目
 - [ ] `name` 是 3-50 字元，小寫加連字號
 - [ ] `name` 不以連字號開頭或結尾
-- [ ] `description` 有 2-4 個 `<example>` blocks
-- [ ] 每個 example 有 Context, user, assistant, commentary
-- [ ] `model` 是有效值
+- [ ] `description` 清楚說明何時使用（可含 `<example>` blocks）
+- [ ] `model` 是有效值：`inherit`, `sonnet`, `opus`, `haiku`
 - [ ] `color` 是有效值
-- [ ] `tools` 只包含必要的工具（如有指定）
-- [ ] System prompt 使用第二人稱 "You are..."
+
+### 工具權限
+- [ ] `tools` 只包含必要的工具（最小權限原則）
+- [ ] 唯讀 Agent（Architect/Reviewer）沒有 `Write`/`Edit`
+
+### Skills 整合（如需要）
+- [ ] `skills` 列出的 skill 都存在於 `skills/` 目錄
+- [ ] Skills 內容與 Agent 職責相關
+
+### Hooks 定義（如需要）
+- [ ] `hooks` 使用正確的 event name（`PreToolUse`、`PostToolUse`、`Stop`）
+- [ ] Hook scripts 使用 Node.js 確保跨平台
+
+### System Prompt
+- [ ] 使用第二人稱 "You are..."
 - [ ] 有清楚的職責描述
 - [ ] 有明確的「不應該做」清單
 - [ ] 有輸出格式定義

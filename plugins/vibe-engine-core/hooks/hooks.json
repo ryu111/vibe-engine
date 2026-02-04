@@ -22,9 +22,19 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/prompt-classifier.js\"",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/task-decomposition-engine.js\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/agent-router.js\"",
+            "timeout": 5
           }
         ],
-        "description": "分類用戶請求，決定處理策略"
+        "description": "分類用戶請求、生成任務分解、產生路由計劃"
       }
     ],
     "PreToolUse": [
@@ -34,6 +44,11 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/permission-guard.js\"",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/budget-tracker-engine.js\"",
             "timeout": 5
           }
         ],
@@ -48,9 +63,14 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/result-logger.js\"",
             "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/budget-tracker-engine.js\"",
+            "timeout": 5
           }
         ],
-        "description": "記錄工具執行結果"
+        "description": "記錄工具執行結果並更新預算"
       }
     ],
     "Stop": [
@@ -64,11 +84,16 @@
           },
           {
             "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/verification-engine.js\"",
+            "timeout": 120
+          },
+          {
+            "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/auto-progress.js\"",
             "timeout": 30
           }
         ],
-        "description": "驗證任務完成並自動更新進度文檔"
+        "description": "驗證任務完成、執行自動化驗證、更新進度文檔"
       }
     ],
     "PreCompact": [

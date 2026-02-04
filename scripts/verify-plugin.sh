@@ -96,7 +96,7 @@ for cmd in "${COMMANDS[@]}"; do
 done
 
 # Hook scripts 檢查
-HOOKS=("session-init" "prompt-classifier" "permission-guard" "result-logger" "completion-check" "state-saver")
+HOOKS=("session-init" "prompt-classifier" "permission-guard" "result-logger" "completion-check" "state-saver" "task-decomposition-engine" "budget-tracker-engine" "verification-engine" "agent-router")
 for hook in "${HOOKS[@]}"; do
   if [ -f "$PLUGIN_DIR/hooks/scripts/$hook.js" ]; then
     echo -e "  ${GREEN}✅${NC} hooks/scripts/$hook.js"

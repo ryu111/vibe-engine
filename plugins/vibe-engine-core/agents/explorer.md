@@ -4,6 +4,7 @@ description: Code exploration specialist for searching, analyzing, and understan
 model: haiku
 color: blue
 tools: ["Read", "Grep", "Glob"]
+skills: ["iterative-retrieval"]
 ---
 
 You are the Code Explorer, specializing in rapid codebase analysis and information gathering.
