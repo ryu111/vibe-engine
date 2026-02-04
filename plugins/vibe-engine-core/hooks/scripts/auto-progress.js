@@ -225,6 +225,80 @@ ${verification.success
 }
 
 /**
+ * 生成進度摘要報告
+ */
+function generateProgressReport(verification, components) {
+  // 計算統計
+  const stats = {
+    agents: { total: components.agents.length, done: components.agents.filter(a => a.hasContent).length, scaffold: components.agents.filter(a => a.exists && !a.hasContent).length },
+    skills: { total: components.skills.length, done: components.skills.filter(s => s.hasContent).length, scaffold: components.skills.filter(s => s.exists && !s.hasContent).length },
+    commands: { total: components.commands.length, done: components.commands.filter(c => c.hasContent).length, scaffold: components.commands.filter(c => c.exists && !c.hasContent).length },
+    hooks: { total: components.hooks.length, done: components.hooks.filter(h => h.hasContent).length, scaffold: components.hooks.filter(h => h.exists && !h.hasContent).length }
+  };
+
+  const totalDone = stats.agents.done + stats.skills.done + stats.commands.done + stats.hooks.done;
+  const totalScaffold = stats.agents.scaffold + stats.skills.scaffold + stats.commands.scaffold + stats.hooks.scaffold;
+  const totalComponents = stats.agents.total + stats.skills.total + stats.commands.total + stats.hooks.total;
+
+  // 找出需要補充的組件
+  const needsWork = [];
+  components.agents.filter(a => a.exists && !a.hasContent).forEach(a => needsWork.push(`agents/${a.name}.md`));
+  components.skills.filter(s => s.exists && !s.hasContent).forEach(s => needsWork.push(`skills/${s.name}`));
+  components.commands.filter(c => c.exists && !c.hasContent).forEach(c => needsWork.push(`commands/${c.name}.md`));
+  components.hooks.filter(h => h.exists && !h.hasContent).forEach(h => needsWork.push(`hooks/${h.name}.js`));
+
+  // 生成報告
+  const lines = [
+    '',
+    '╔══════════════════════════════════════════════════╗',
+    '║          Vibe Engine Session Summary             ║',
+    '╠══════════════════════════════════════════════════╣',
+    `║ 驗證結果: ${verification.success ? '✅ PASS' : '❌ FAIL'} (${verification.passed}/${verification.passed + verification.failed})`,
+    '╠══════════════════════════════════════════════════╣',
+    '║ 組件進度                                         ║',
+    `║ ├─ Agents:   ${stats.agents.done}/${stats.agents.total} 完成${stats.agents.scaffold > 0 ? `, ${stats.agents.scaffold} 待補充` : ''}`,
+    `║ ├─ Skills:   ${stats.skills.done}/${stats.skills.total} 完成${stats.skills.scaffold > 0 ? `, ${stats.skills.scaffold} 待補充` : ''}`,
+    `║ ├─ Commands: ${stats.commands.done}/${stats.commands.total} 完成${stats.commands.scaffold > 0 ? `, ${stats.commands.scaffold} 待補充` : ''}`,
+    `║ └─ Hooks:    ${stats.hooks.done}/${stats.hooks.total} 完成${stats.hooks.scaffold > 0 ? `, ${stats.hooks.scaffold} 待補充` : ''}`,
+    `║                                                  ║`,
+    `║ 總體: ${totalDone}/${totalComponents} 完成 (${Math.round(totalDone/totalComponents*100)}%)`,
+  ];
+
+  if (needsWork.length > 0 && needsWork.length <= 5) {
+    lines.push('╠══════════════════════════════════════════════════╣');
+    lines.push('║ 待補充組件                                       ║');
+    needsWork.forEach(item => lines.push(`║ └─ ${item}`));
+  }
+
+  lines.push('╠══════════════════════════════════════════════════╣');
+  lines.push('║ 可用命令                                         ║');
+  lines.push('║ ├─ /status - 查看系統狀態                        ║');
+  lines.push('║ ├─ /verify - 執行驗證協議                        ║');
+  lines.push('║ ├─ /budget - 查看預算使用                        ║');
+  lines.push('║ └─ /spec   - 生成規格檔案                        ║');
+  lines.push('╠══════════════════════════════════════════════════╣');
+  lines.push('║ 下一步建議                                       ║');
+
+  if (!verification.success) {
+    lines.push('║ └─ 修復驗證失敗的項目                            ║');
+  } else if (totalScaffold > 0) {
+    lines.push('║ ├─ 補充 skill 實際邏輯                           ║');
+    lines.push('║ ├─ 強化 hook 功能                                ║');
+    lines.push('║ └─ 在其他專案測試載入                            ║');
+  } else {
+    lines.push('║ ├─ 建立 P1 plugins (guarantee, memory)           ║');
+    lines.push('║ └─ 實作完整功能測試                              ║');
+  }
+
+  lines.push('╚══════════════════════════════════════════════════╝');
+  lines.push('');
+  lines.push('📄 進度已更新: docs/PROGRESS.md');
+  lines.push('');
+
+  return lines.join('\n');
+}
+
+/**
  * 主函數
  */
 async function main() {
@@ -266,20 +340,20 @@ async function main() {
     console.error(`[Auto Progress] Failed to update: ${error.message}`);
   }
 
+  // 生成進度報告
+  const progressReport = generateProgressReport(verification, components);
+
   // 如果是 hook 呼叫，輸出 hook response
   if (hookInput) {
     const output = {
       continue: true,
       suppressOutput: false,
-      systemMessage: `[Auto Progress] Verification: ${verification.passed} passed, ${verification.failed} failed. PROGRESS.md updated.`
+      systemMessage: progressReport
     };
     console.log(JSON.stringify(output));
   } else {
-    // 直接呼叫，輸出摘要
-    console.log('\n=== Auto Progress Summary ===');
-    console.log(`Verification: ${verification.success ? 'PASS' : 'FAIL'}`);
-    console.log(`Passed: ${verification.passed}, Failed: ${verification.failed}`);
-    console.log(`Progress file: ${PROGRESS_FILE}`);
+    // 直接呼叫，輸出報告
+    console.log(progressReport);
   }
 }
 
