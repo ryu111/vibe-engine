@@ -240,6 +240,14 @@ function generateProgressReport(verification, components) {
   const totalScaffold = stats.agents.scaffold + stats.skills.scaffold + stats.commands.scaffold + stats.hooks.scaffold;
   const totalComponents = stats.agents.total + stats.skills.total + stats.commands.total + stats.hooks.total;
 
+  // 計算兩種完成度
+  // 結構完成度 = 所有檔案都有內容
+  const structurePercent = Math.round(totalDone / totalComponents * 100);
+  // 功能完成度 = 只計算可執行組件 (hooks)，其他為文檔指南
+  const functionalComponents = stats.hooks.done; // 只有 hooks 是真正可執行的
+  const functionalTotal = stats.hooks.total;
+  const functionalPercent = Math.round(functionalComponents / functionalTotal * 100);
+
   // 找出需要補充的組件
   const needsWork = [];
   components.agents.filter(a => a.exists && !a.hasContent).forEach(a => needsWork.push(`agents/${a.name}.md`));
@@ -255,27 +263,37 @@ function generateProgressReport(verification, components) {
     '╠══════════════════════════════════════════════════╣',
     `║ 驗證結果: ${verification.success ? '✅ PASS' : '❌ FAIL'} (${verification.passed}/${verification.passed + verification.failed})`,
     '╠══════════════════════════════════════════════════╣',
-    '║ 組件進度                                         ║',
-    `║ ├─ Agents:   ${stats.agents.done}/${stats.agents.total} 完成${stats.agents.scaffold > 0 ? `, ${stats.agents.scaffold} 待補充` : ''}`,
-    `║ ├─ Skills:   ${stats.skills.done}/${stats.skills.total} 完成${stats.skills.scaffold > 0 ? `, ${stats.skills.scaffold} 待補充` : ''}`,
-    `║ ├─ Commands: ${stats.commands.done}/${stats.commands.total} 完成${stats.commands.scaffold > 0 ? `, ${stats.commands.scaffold} 待補充` : ''}`,
-    `║ └─ Hooks:    ${stats.hooks.done}/${stats.hooks.total} 完成${stats.hooks.scaffold > 0 ? `, ${stats.hooks.scaffold} 待補充` : ''}`,
-    `║                                                  ║`,
-    `║ 總體: ${totalDone}/${totalComponents} 完成 (${Math.round(totalDone/totalComponents*100)}%)`,
+    '║ 完成度                                           ║',
+    `║ ├─ 結構: ${structurePercent}% (${totalDone}/${totalComponents} 檔案有內容)`,
+    `║ └─ 功能: ${functionalPercent}% (${functionalComponents}/${functionalTotal} hooks 可執行)`,
+    '╠══════════════════════════════════════════════════╣',
+    '║ 組件狀態                                         ║',
+    `║ ├─ Agents:   ${stats.agents.done}/${stats.agents.total} 文檔${stats.agents.scaffold > 0 ? ` (${stats.agents.scaffold} 待補)` : ''}`,
+    `║ ├─ Skills:   ${stats.skills.done}/${stats.skills.total} 指南${stats.skills.scaffold > 0 ? ` (${stats.skills.scaffold} 待補)` : ''}`,
+    `║ ├─ Commands: ${stats.commands.done}/${stats.commands.total} 文檔${stats.commands.scaffold > 0 ? ` (${stats.commands.scaffold} 待補)` : ''}`,
+    `║ └─ Hooks:    ${stats.hooks.done}/${stats.hooks.total} 可執行${stats.hooks.scaffold > 0 ? ` (${stats.hooks.scaffold} 待補)` : ''}`,
   ];
 
   if (needsWork.length > 0 && needsWork.length <= 5) {
     lines.push('╠══════════════════════════════════════════════════╣');
-    lines.push('║ 待補充組件                                       ║');
+    lines.push('║ 待補充                                           ║');
     needsWork.forEach(item => lines.push(`║ └─ ${item}`));
   }
 
+  // 缺失引擎提醒
+  lines.push('╠══════════════════════════════════════════════════╣');
+  lines.push('║ 待實作引擎                                       ║');
+  lines.push('║ ├─ Task Decomposition Engine (自動分解任務)      ║');
+  lines.push('║ ├─ Budget Tracker Engine (Token 追蹤)            ║');
+  lines.push('║ ├─ Verification Engine (自動化驗證)              ║');
+  lines.push('║ └─ Agent Router (根據分類派發 Task)              ║');
+
   lines.push('╠══════════════════════════════════════════════════╣');
   lines.push('║ 可用命令                                         ║');
-  lines.push('║ ├─ /status - 查看系統狀態                        ║');
-  lines.push('║ ├─ /verify - 執行驗證協議                        ║');
-  lines.push('║ ├─ /budget - 查看預算使用                        ║');
-  lines.push('║ └─ /spec   - 生成規格檔案                        ║');
+  lines.push('║ ├─ /status  查看系統狀態                         ║');
+  lines.push('║ ├─ /verify  執行驗證協議                         ║');
+  lines.push('║ ├─ /budget  查看預算使用                         ║');
+  lines.push('║ └─ /spec    生成規格檔案                         ║');
   lines.push('╠══════════════════════════════════════════════════╣');
   lines.push('║ 下一步建議                                       ║');
 
@@ -283,11 +301,11 @@ function generateProgressReport(verification, components) {
     lines.push('║ └─ 修復驗證失敗的項目                            ║');
   } else if (totalScaffold > 0) {
     lines.push('║ ├─ 補充 skill 實際邏輯                           ║');
-    lines.push('║ ├─ 強化 hook 功能                                ║');
     lines.push('║ └─ 在其他專案測試載入                            ║');
   } else {
+    lines.push('║ ├─ 實作核心引擎 (Task Decomposition 優先)        ║');
     lines.push('║ ├─ 建立 P1 plugins (guarantee, memory)           ║');
-    lines.push('║ └─ 實作完整功能測試                              ║');
+    lines.push('║ └─ 在其他專案測試載入                            ║');
   }
 
   lines.push('╚══════════════════════════════════════════════════╝');
