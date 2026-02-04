@@ -41,4 +41,63 @@ extracted_memories:
     source: "[where this came from]"
 ```
 
-<!-- TODO: 實作完整記憶提取邏輯 -->
+**Workflow:**
+
+When activated, follow these steps:
+
+1. **Read Source Data**
+   ```javascript
+   // Read observations or conversation content
+   const { readJSONL } = require('./hooks/scripts/lib/jsonl');
+   const observations = readJSONL('.vibe-engine/observations.jsonl');
+   ```
+
+2. **Extract Memories**
+   ```javascript
+   const { classifyMemory } = require('./hooks/scripts/lib/memory-item');
+
+   function extractFromObservation(obs) {
+     // High-value: user corrections
+     if (obs.user_correction || obs.outcome === 'corrected') {
+       return {
+         type: 'episodic',
+         content: `When using ${obs.tool_name}: ${obs.correction_details}`,
+         confidence: 0.7
+       };
+     }
+     // ...
+   }
+   ```
+
+3. **Deduplicate**
+   ```javascript
+   const { MemoryStore } = require('./hooks/scripts/lib/memory-store');
+   const store = new MemoryStore();
+
+   // Check existing before storing
+   const existing = store.retrieve(candidate.content, { limit: 1 });
+   if (existing.length > 0 && calculateSimilarity(existing[0], candidate) > 0.8) {
+     // Update instead of create
+     store.update(existing[0].id, { metadata: { access_count: +1 } });
+   }
+   ```
+
+4. **Store with Confidence**
+   ```javascript
+   const { INITIAL_CONFIDENCE } = require('./hooks/scripts/lib/confidence');
+
+   const result = store.store(memory.type, memory.content, {
+     confidence: memory.confidence || INITIAL_CONFIDENCE.SINGLE_OBSERVATION,
+     source: 'agent',
+     tags: memory.tags || []
+   });
+   ```
+
+**Lib Dependencies:**
+
+| Lib | Usage |
+|-----|-------|
+| `memory-store.js` | MemoryStore.store(), retrieve(), update() |
+| `memory-item.js` | createMemoryItem(), findDuplicate(), calculateSimilarity() |
+| `confidence.js` | INITIAL_CONFIDENCE, adjustConfidence() |
+| `jsonl.js` | readJSONL() for observations |
