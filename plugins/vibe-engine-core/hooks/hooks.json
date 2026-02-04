@@ -61,9 +61,14 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/completion-check.js\"",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/auto-progress.js\"",
+            "timeout": 30
           }
         ],
-        "description": "驗證任務是否真正完成"
+        "description": "驗證任務完成並自動更新進度文檔"
       }
     ],
     "PreCompact": [
