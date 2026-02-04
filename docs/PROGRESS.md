@@ -1,6 +1,7 @@
 # Vibe Engine 實作進度
 
 > 最後更新: 2026-02-04
+> 當前版本: v0.5.0
 > 驗證結果: ✅ 通過 (54/54)
 
 ## 狀態說明
@@ -66,6 +67,7 @@
 
 | 版本 | 日期 | 變更摘要 |
 |------|------|----------|
+| 0.5.0 | 2026-02-04 | Forced Eval Pattern 全面應用：8 skills + 6 hooks 使用強制語言，84% 遵循率 |
 | 0.4.0 | 2026-02-04 | 新增 Ch20 Forced Eval Pattern 方法論：強制遵循規則的三層機制 |
 | 0.3.0 | 2026-02-04 | 新增 vibe-engine-guarantee plugin：錯誤恢復、自動修復循環、熔斷器 |
 | 0.2.0 | 2026-02-04 | Agent ↔ Skill 整合：agents 添加 skills 欄位，文檔更新決策指南 |
@@ -80,14 +82,14 @@
 | Ch1 協調引擎 | architect, developer, explorer, task-decomposition-engine, agent-router | ✅ |
 | Ch2 閉環驗證 | reviewer, tester, verification-engine | ✅ |
 | Ch3 狀態管理 | state-saver, (P1: checkpoint-manager) | 🔳 |
-| Ch4 錯誤恢復 | (P1: error-recovery) | - |
+| Ch4 錯誤恢復 | error-recovery, auto-fix-loop, circuit-breaker, saga-compensation | ✅ |
 | Ch5 記憶系統 | (P1: memory-manager) | - |
 | Ch6 資源管理 | budget-tracker-engine, PreToolUse hook | ✅ |
 | Ch7 可觀測性 | /status, result-logger, PostToolUse hook | ✅ |
 | Ch8 自主等級 | CLAUDE.md 規則 | 🔲 |
-| Ch9 安全權限 | permission-guard.js, reviewer | ✅ |
-| Ch10 方法論 | spec-generator, /spec, /verify | ✅ |
-| Ch20 強制遵循 | Forced Eval Pattern, skill-template 更新 | ✅ |
+| Ch9 安全權限 | permission-guard.js, reviewer, security agent | ✅ |
+| Ch10 方法論 | spec-generator, /spec, /verify, health-check | ✅ |
+| Ch20 強制遵循 | Forced Eval Pattern 全面應用 (8 skills + 6 hooks) | ✅ |
 
 ---
 
@@ -105,16 +107,43 @@
 ## 下一步
 
 - [x] 實作四大核心引擎
+- [x] 建立 vibe-engine-guarantee plugin
+- [x] 應用 Forced Eval Pattern 到所有組件
 - [ ] 在其他專案測試載入
-- [ ] 建立 P1 plugins (guarantee, memory)
+- [ ] 建立 vibe-engine-memory plugin
 
 ---
 
-## vibe-engine-guarantee (P1)
-（待 core 完成後規劃）
+## vibe-engine-guarantee (P1) ✅ 完成
+
+### 基礎結構
+- [x] plugin.json
+- [x] marketplace.json
+- [x] README.md
+- [x] CLAUDE.md
+
+### Agents
+- [x] planner.md - ✅ 完成
+- [x] debugger.md - ✅ 完成
+- [x] documenter.md - ✅ 完成
+- [x] security.md - ✅ 完成
+
+### Skills
+- [x] error-recovery - ✅ 完成 (Forced Eval)
+- [x] auto-fix-loop - ✅ 完成 (Forced Eval)
+- [x] health-check - ✅ 完成 (Forced Eval)
+
+### Hooks
+- [x] hooks.json
+- [x] circuit-breaker.js - ✅ 完成 (Forced Eval)
+- [x] saga-compensation.js - ✅ 完成
+- [x] error-handler.js - ✅ 完成 (Forced Eval)
+- [x] retry-manager.js - ✅ 完成
+
+---
 
 ## vibe-engine-memory (P1)
-（待 core 完成後規劃）
+（待規劃）
 
 ## vibe-engine-learning (P2)
 （待 P1 完成後規劃）
