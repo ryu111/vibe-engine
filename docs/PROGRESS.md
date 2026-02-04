@@ -2,7 +2,8 @@
 
 > 最後更新: 2026-02-04
 > 當前版本: v0.5.2
-> 驗證結果: ✅ 通過 (54/54)
+> 內部驗證: ✅ 通過 (54/54)
+> 載入測試: ✅ 通過 (32/32) - vibe-test 專案
 
 ## 狀態說明
 - ⬜ 未開始
@@ -57,9 +58,10 @@
 
 ## 驗證歷史
 
-| 日期 | 通過 | 失敗 | 狀態 |
-|------|------|------|------|
-| 2026-02-04 | 54 | 0 | ✅ |
+| 日期 | 類型 | 通過 | 失敗 | 狀態 |
+|------|------|------|------|------|
+| 2026-02-04 | 跨專案載入測試 (vibe-test) | 32/32 | 0 | ✅ |
+| 2026-02-04 | 內部結構驗證 | 54/54 | 0 | ✅ |
 
 ---
 
@@ -113,12 +115,13 @@
 - [x] 建立 vibe-engine-guarantee plugin
 - [x] 應用 Forced Eval Pattern 到所有組件
 - [x] Hook 腳本執行驗證（5/5 通過）
+- [x] 跨專案載入測試（vibe-test，32/32 通過）
+- [x] 建立載入測試指南 (docs/load-test-guide.md)
 
 ### 待完成（按優先級）
-1. [ ] **P1**: 在其他專案測試載入（載入測試）
-2. [ ] **P1**: 建立 vibe-engine-memory plugin（Ch5 記憶系統）
-3. [ ] **P2**: 建立 vibe-engine-dashboard plugin（Ch7 TUI Dashboard）
-4. [ ] **P2**: 建立 vibe-engine-learning plugin（Ch5 Instinct Learning）
+1. [ ] **P1**: 建立 vibe-engine-memory plugin（Ch5 記憶系統）
+2. [ ] **P2**: 建立 vibe-engine-dashboard plugin（Ch7 TUI Dashboard）
+3. [ ] **P2**: 建立 vibe-engine-learning plugin（Ch5 Instinct Learning）
 
 ---
 
@@ -159,6 +162,34 @@
 - [x] saga-compensation.js - ✅ 完成
 - [x] error-handler.js - ✅ 完成 (Forced Eval)
 - [x] retry-manager.js - ✅ 完成
+
+---
+
+## 跨專案載入測試結果
+
+**測試專案**: vibe-test
+**測試日期**: 2026-02-04
+**Plugin 版本**: v0.5.0（測試時版本，問題已在 v0.5.2 修復）
+
+| 類別 | 通過 | 說明 |
+|------|------|------|
+| 結構驗證 | 5/5 | plugin.json, hooks.json, frontmatter |
+| Commands | 5/5 | /status, /budget, /spec, /verify, /health |
+| Hooks | 8/8 | 包含 Permission Guard 正確攔截 .env |
+| Agents | 6/6 | 所有 agents 成功觸發，總計 77,100 tokens |
+| Skills | 8/8 | 所有 skills 功能正常 |
+| **總計** | **32/32** | **100% 通過** |
+
+### Agent 效能統計
+
+| Agent | Tokens | 時間 |
+|-------|--------|------|
+| architect | 14,917 | 17.7s |
+| debugger | 27,383 | 17.9s |
+| developer | 10,043 | 5.9s |
+| explorer | 5,241 | 3.0s |
+| reviewer | 9,511 | 7.0s |
+| tester | 10,005 | 4.5s |
 
 ---
 
