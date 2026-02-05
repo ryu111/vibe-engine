@@ -18,37 +18,16 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getProjectRoot, ensureVibeEngineDirs } = require('./lib/common');
+const { parseSimpleYaml } = require('./lib/yaml-parser');
+const {
+  ALERT_THRESHOLDS: LIB_ALERT_THRESHOLDS,
+  getAlertLevel: getLibAlertLevel,
+  formatAlertSystemMessage
+} = require('./lib/alerts');
 
 // 配置
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '../..');
-
-/**
- * 獲取用戶專案根目錄
- */
-function getProjectRoot() {
-  const cwd = process.cwd();
-
-  // 如果 CWD 在 plugin cache 內，需要找到真正的專案目錄
-  if (cwd.includes('.claude/plugins/cache')) {
-    if (process.env.CLAUDE_PROJECT_ROOT) {
-      return process.env.CLAUDE_PROJECT_ROOT;
-    }
-    return path.join(process.env.HOME || '/tmp', '.vibe-engine-global');
-  }
-
-  // 向上查找專案根目錄
-  let current = cwd;
-  while (current !== '/') {
-    if (fs.existsSync(path.join(current, '.git')) ||
-        fs.existsSync(path.join(current, '.vibe-engine')) ||
-        fs.existsSync(path.join(current, 'package.json'))) {
-      return current;
-    }
-    current = path.dirname(current);
-  }
-
-  return cwd;
-}
 
 const PROJECT_ROOT = getProjectRoot();
 const VIBE_ENGINE_DIR = path.join(PROJECT_ROOT, '.vibe-engine');
@@ -102,12 +81,8 @@ const DEFAULT_BUDGET = {
   }
 };
 
-// 警報閾值
-const ALERT_THRESHOLDS = {
-  warning: 0.70,    // 70%
-  critical: 0.90,   // 90%
-  exceeded: 1.00    // 100%
-};
+// 警報閾值（從 lib/alerts.js 導入，保留別名向後兼容）
+const ALERT_THRESHOLDS = LIB_ALERT_THRESHOLDS;
 
 // 工具操作類型
 const TOOL_OPERATIONS = {
@@ -135,57 +110,6 @@ function loadConfig() {
     console.error(`[Budget Tracker] Config load error: ${error.message}`);
   }
   return DEFAULT_BUDGET;
-}
-
-/**
- * 簡單 YAML 解析
- */
-function parseSimpleYaml(content) {
-  const result = {};
-  const lines = content.split('\n');
-  let currentPath = [];
-  let currentIndent = 0;
-
-  for (const line of lines) {
-    if (line.trim() === '' || line.trim().startsWith('#')) continue;
-
-    const indent = line.search(/\S/);
-    const content = line.trim();
-
-    if (indent < currentIndent) {
-      currentPath = currentPath.slice(0, Math.floor(indent / 2));
-    }
-    currentIndent = indent;
-
-    if (content.includes(':')) {
-      const [key, ...valueParts] = content.split(':');
-      const value = valueParts.join(':').trim();
-
-      if (value === '') {
-        currentPath.push(key.trim());
-      } else {
-        let parsed = value;
-        if (value.startsWith('$')) {
-          parsed = parseFloat(value.slice(1));
-        } else if (!isNaN(value)) {
-          parsed = value.includes('.') ? parseFloat(value) : parseInt(value);
-        } else if (value === 'true') {
-          parsed = true;
-        } else if (value === 'false') {
-          parsed = false;
-        }
-
-        let obj = result;
-        for (const p of currentPath) {
-          obj[p] = obj[p] || {};
-          obj = obj[p];
-        }
-        obj[key.trim()] = parsed;
-      }
-    }
-  }
-
-  return result;
 }
 
 /**
@@ -306,37 +230,10 @@ function getBudgetUsage(usage, budget, complexity = 'moderate') {
 }
 
 /**
- * 判斷警報等級
+ * 判斷警報等級（委託給 lib/alerts.js）
  */
 function getAlertLevel(budgetUsage) {
-  const usage = budgetUsage.overall;
-
-  if (usage >= ALERT_THRESHOLDS.exceeded) {
-    return {
-      level: 'exceeded',
-      icon: '🛑',
-      message: '預算已用盡，請增加預算或結束任務'
-    };
-  }
-  if (usage >= ALERT_THRESHOLDS.critical) {
-    return {
-      level: 'critical',
-      icon: '⚠️',
-      message: '預算即將用盡，建議創建 checkpoint 並完成當前步驟'
-    };
-  }
-  if (usage >= ALERT_THRESHOLDS.warning) {
-    return {
-      level: 'warning',
-      icon: '⚡',
-      message: '預算使用超過 70%，考慮使用更經濟的模型'
-    };
-  }
-  return {
-    level: 'normal',
-    icon: '✅',
-    message: '預算充足'
-  };
+  return getLibAlertLevel(budgetUsage);
 }
 
 /**
@@ -576,121 +473,153 @@ function preToolUseCheck(toolName, sessionId, budget, usage) {
   };
 }
 
+// ============================================================
+// 輸入處理函數（Phase 2 重構提取）
+// ============================================================
+
 /**
- * 主函數
+ * 讀取 stdin 輸入
  */
-async function main() {
+async function readStdinInput() {
+  if (process.stdin.isTTY) return '';
+
   let input = '';
+  process.stdin.setEncoding('utf8');
 
-  // 讀取 stdin
-  if (!process.stdin.isTTY) {
-    process.stdin.setEncoding('utf8');
+  await new Promise((resolve) => {
+    process.stdin.on('data', (chunk) => { input += chunk; });
+    process.stdin.on('end', resolve);
+  });
 
-    await new Promise((resolve) => {
-      process.stdin.on('data', (chunk) => { input += chunk; });
-      process.stdin.on('end', resolve);
-    });
+  return input;
+}
+
+/**
+ * 解析 Hook 輸入並更新使用量
+ * @returns {object} { sessionId, hookType, toolName, complexity, usage }
+ */
+function parseHookInput(input, initialSessionId, initialUsage) {
+  let sessionId = initialSessionId;
+  let usage = initialUsage;
+  let hookType = null;
+  let toolName = null;
+  let complexity = 'moderate';
+
+  if (!input.trim()) {
+    return { sessionId, hookType, toolName, complexity, usage };
   }
 
   try {
-    const budget = loadConfig();
-    let sessionId = process.env.CLAUDE_SESSION_ID || 'default';
-    let usage = loadUsage(sessionId);
-    let hookType = null;
-    let toolName = null;
-    let complexity = 'moderate';
+    const hookInput = JSON.parse(input);
+    sessionId = hookInput.session_id || sessionId;
 
-    // 解析輸入
-    if (input.trim()) {
-      try {
-        const hookInput = JSON.parse(input);
-        sessionId = hookInput.session_id || sessionId;
-
-        // 判斷 hook 類型
-        if (hookInput.tool_name) {
-          toolName = hookInput.tool_name;
-          hookType = hookInput.tool_result ? 'PostToolUse' : 'PreToolUse';
-        }
-
-        // 獲取任務複雜度（如果有）
-        if (hookInput.hookSpecificOutput?.complexity) {
-          complexity = hookInput.hookSpecificOutput.complexity;
-        }
-
-        // 處理 token 使用（PostToolUse）
-        if (hookType === 'PostToolUse' && hookInput.tool_result) {
-          const tokenUsage = hookInput.token_usage || null;
-          const model = hookInput.model || 'sonnet';
-          usage = recordToolUse(usage, toolName, tokenUsage, model);
-          saveUsage(sessionId, usage);
-        }
-
-      } catch {
-        // 不是 JSON，當作命令
-      }
+    if (hookInput.tool_name) {
+      toolName = hookInput.tool_name;
+      hookType = hookInput.tool_result ? 'PostToolUse' : 'PreToolUse';
     }
 
-    // 命令列參數處理
-    const args = process.argv.slice(2);
-    if (args.includes('--report') || args.includes('-r') || (!hookType && !input.trim())) {
-      // 生成報告
-      const report = generateBudgetReport(usage, budget, complexity);
-      console.log(formatReportText(report));
-      return;
+    if (hookInput.hookSpecificOutput?.complexity) {
+      complexity = hookInput.hookSpecificOutput.complexity;
     }
 
-    if (args.includes('--json')) {
-      const report = generateBudgetReport(usage, budget, complexity);
-      console.log(JSON.stringify(report, null, 2));
-      return;
-    }
-
-    if (args.includes('--reset')) {
-      usage = createEmptyUsage();
+    // PostToolUse 時記錄 token 使用
+    if (hookType === 'PostToolUse' && hookInput.tool_result) {
+      const tokenUsage = hookInput.token_usage || null;
+      const model = hookInput.model || 'sonnet';
+      usage = recordToolUse(usage, toolName, tokenUsage, model);
       saveUsage(sessionId, usage);
-      console.log('Budget usage reset.');
+    }
+  } catch {
+    // 不是 JSON，保持預設值
+  }
+
+  return { sessionId, hookType, toolName, complexity, usage };
+}
+
+/**
+ * 處理 CLI 命令參數
+ * @returns {boolean} 是否已處理（true 表示應該結束）
+ */
+function handleCliCommand(args, usage, budget, sessionId, complexity, hookType, hasInput) {
+  if (args.includes('--report') || args.includes('-r') || (!hookType && !hasInput)) {
+    const report = generateBudgetReport(usage, budget, complexity);
+    console.log(formatReportText(report));
+    return true;
+  }
+
+  if (args.includes('--json')) {
+    const report = generateBudgetReport(usage, budget, complexity);
+    console.log(JSON.stringify(report, null, 2));
+    return true;
+  }
+
+  if (args.includes('--reset')) {
+    const newUsage = createEmptyUsage();
+    saveUsage(sessionId, newUsage);
+    console.log('Budget usage reset.');
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * 構建 PostToolUse 輸出（使用 lib/alerts.js）
+ */
+function buildPostToolUseOutput(usage, budget, complexity) {
+  const budgetUsage = getBudgetUsage(usage, budget, complexity);
+  const alert = getAlertLevel(budgetUsage);
+  const usagePercent = Math.round(budgetUsage.overall * 100);
+
+  const output = {
+    continue: alert.level !== 'exceeded',
+    suppressOutput: false,
+    hookSpecificOutput: {
+      budget_status: `${usagePercent}%`,
+      alert_level: alert.level
+    }
+  };
+
+  // 使用 lib/alerts.js 的格式化函數
+  const systemMessage = formatAlertSystemMessage(alert, usagePercent);
+  if (systemMessage) {
+    output.systemMessage = systemMessage;
+  }
+
+  return output;
+}
+
+/**
+ * 主函數（重構後）
+ */
+async function main() {
+  try {
+    const input = await readStdinInput();
+    const budget = loadConfig();
+    const initialSessionId = process.env.CLAUDE_SESSION_ID || 'default';
+    const initialUsage = loadUsage(initialSessionId);
+
+    const { sessionId, hookType, toolName, complexity, usage } =
+      parseHookInput(input, initialSessionId, initialUsage);
+
+    // CLI 命令處理
+    const args = process.argv.slice(2);
+    if (handleCliCommand(args, usage, budget, sessionId, complexity, hookType, !!input.trim())) {
       return;
     }
 
     // Hook 模式輸出
     if (hookType === 'PreToolUse') {
-      const check = preToolUseCheck(toolName, sessionId, budget, usage);
-      console.log(JSON.stringify(check));
+      console.log(JSON.stringify(preToolUseCheck(toolName, sessionId, budget, usage)));
     } else if (hookType === 'PostToolUse') {
-      const budgetUsage = getBudgetUsage(usage, budget, complexity);
-      const alert = getAlertLevel(budgetUsage);
-
-      const output = {
-        continue: true,
-        suppressOutput: false,
-        hookSpecificOutput: {
-          budget_status: `${Math.round(budgetUsage.overall * 100)}%`,
-          alert_level: alert.level
-        }
-      };
-
-      // 警報時添加系統訊息 - 使用 Forced Eval Pattern 強制語言
-      if (alert.level === 'exceeded') {
-        output.systemMessage = `⛔ MANDATORY STOP: Budget exhausted (${Math.round(budgetUsage.overall * 100)}%). ⛔ BLOCK all further operations until budget reset or user approval.`;
-        output.continue = false;
-      } else if (alert.level === 'urgent') {
-        output.systemMessage = `⛔ CRITICAL: Budget nearly exhausted (${Math.round(budgetUsage.overall * 100)}%). MUST create checkpoint immediately. Consider stopping or downgrading model.`;
-      } else if (alert.level !== 'normal') {
-        output.systemMessage = `[Budget Tracker] ${alert.icon} ${alert.message} (${Math.round(budgetUsage.overall * 100)}%)`;
-      }
-
-      console.log(JSON.stringify(output));
+      console.log(JSON.stringify(buildPostToolUseOutput(usage, budget, complexity)));
     } else {
-      // 直接呼叫，顯示報告
       const report = generateBudgetReport(usage, budget, complexity);
       console.log(formatReportText(report));
     }
 
   } catch (error) {
-    console.log(JSON.stringify({
-      continue: true,
-      error: error.message
-    }));
+    console.log(JSON.stringify({ continue: true, error: error.message }));
   }
 }
 

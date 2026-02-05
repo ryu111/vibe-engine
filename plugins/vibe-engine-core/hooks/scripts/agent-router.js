@@ -17,42 +17,14 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getProjectRoot } = require('./lib/common');
+const { parseSimpleYaml } = require('./lib/yaml-parser');
 
 // ============================================================
 // 配置
 // ============================================================
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '../..');
-
-/**
- * 獲取用戶專案根目錄
- */
-function getProjectRoot() {
-  // 優先使用環境變數
-  if (process.env.CLAUDE_PROJECT_ROOT) {
-    return process.env.CLAUDE_PROJECT_ROOT;
-  }
-
-  const cwd = process.cwd();
-
-  // 如果 CWD 在 plugin cache 內，無法確定專案目錄
-  if (cwd.includes('.claude/plugins/cache')) {
-    return path.join(process.env.HOME || '/tmp', '.vibe-engine-global');
-  }
-
-  // 向上查找專案根目錄
-  let current = cwd;
-  while (current !== '/') {
-    if (fs.existsSync(path.join(current, '.git')) ||
-        fs.existsSync(path.join(current, '.vibe-engine')) ||
-        fs.existsSync(path.join(current, 'package.json'))) {
-      return current;
-    }
-    current = path.dirname(current);
-  }
-
-  return cwd;
-}
 
 const PROJECT_ROOT = getProjectRoot();
 const VIBE_ENGINE_DIR = path.join(PROJECT_ROOT, '.vibe-engine');
@@ -192,47 +164,6 @@ function getLatestTaskDecomposition() {
   }
 }
 
-/**
- * 簡單 YAML 解析（足夠讀取任務檔案）
- */
-function parseSimpleYaml(content) {
-  const result = {};
-  const lines = content.split('\n');
-  let currentKey = null;
-  let currentIndent = 0;
-  let currentArray = null;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-
-    const indent = line.search(/\S/);
-
-    // 鍵值對
-    const kvMatch = trimmed.match(/^(\w+):\s*(.*)$/);
-    if (kvMatch) {
-      const [, key, value] = kvMatch;
-      if (value && !value.startsWith('[')) {
-        // 簡單值
-        result[key] = value.replace(/^["']|["']$/g, '');
-      } else if (value.startsWith('[')) {
-        // 內聯陣列
-        try {
-          result[key] = JSON.parse(value.replace(/'/g, '"'));
-        } catch (e) {
-          result[key] = [];
-        }
-      } else {
-        // 複雜值（對象或陣列）
-        result[key] = {};
-        currentKey = key;
-      }
-    }
-  }
-
-  return result;
-}
-
 // ============================================================
 // 路由決策
 // ============================================================
@@ -300,10 +231,56 @@ function selectAgent(task) {
   return bestMatch || 'developer';  // 預設使用 developer
 }
 
+// ============================================================
+// 路由計劃輔助函數（Phase 3 重構提取）
+// ============================================================
+
 /**
- * 生成路由計劃
+ * 構建單一任務對象（消除重複代碼）
+ */
+function buildTask(task, plan) {
+  const agent = selectAgent(task);
+  plan.agents.add(agent);
+  plan.estimatedCost += AGENTS[agent]?.costWeight || 2;
+
+  return {
+    id: task.id,
+    agent,
+    description: task.description,
+    inputs: task.inputs || [],
+    outputs: task.outputs || [],
+    model: AGENTS[agent]?.model || 'sonnet'
+  };
+}
+
+/**
+ * 從並行群組構建階段
+ */
+function buildPhaseFromGroup(group, subtasks, phaseNumber, plan) {
+  const phase = {
+    phase: phaseNumber,
+    parallel: Object.keys(group).length > 1,
+    tasks: []
+  };
+
+  for (const taskId of Object.values(group)) {
+    const task = subtasks.find(t => t.id === taskId);
+    if (task) {
+      phase.tasks.push(buildTask(task, plan));
+    }
+  }
+
+  return phase;
+}
+
+/**
+ * 生成路由計劃（重構後）
  */
 function generateRoutingPlan(taskDecomposition, classification) {
+  if (!taskDecomposition?.task_decomposition) {
+    return null;
+  }
+
   const plan = {
     strategy: 'sequential',
     phases: [],
@@ -311,138 +288,121 @@ function generateRoutingPlan(taskDecomposition, classification) {
     agents: new Set()
   };
 
-  if (!taskDecomposition || !taskDecomposition.task_decomposition) {
-    return null;
-  }
-
   const decomposition = taskDecomposition.task_decomposition;
-  const subtasks = decomposition.subtasks || [];
+  const subtasks = Array.isArray(decomposition.subtasks) ? decomposition.subtasks : [];
   const executionOrder = decomposition.execution_order || {};
   const parallelGroups = executionOrder.parallel_groups || [];
 
-  // 根據並行群組生成階段
   if (parallelGroups.length > 0) {
     plan.strategy = parallelGroups.length > 1 ? 'hybrid' : 'sequential';
-
-    for (let i = 0; i < parallelGroups.length; i++) {
-      const group = parallelGroups[i];
-      const phase = {
-        phase: i + 1,
-        parallel: Object.keys(group).length > 1,
-        tasks: []
-      };
-
-      for (const taskId of Object.values(group)) {
-        const task = subtasks.find(t => t.id === taskId);
-        if (task) {
-          const agent = selectAgent(task);
-          plan.agents.add(agent);
-
-          phase.tasks.push({
-            id: task.id,
-            agent,
-            description: task.description,
-            inputs: task.inputs || [],
-            outputs: task.outputs || [],
-            model: AGENTS[agent]?.model || 'sonnet'
-          });
-
-          // 計算預估成本
-          plan.estimatedCost += AGENTS[agent]?.costWeight || 2;
-        }
-      }
-
-      plan.phases.push(phase);
-    }
+    parallelGroups.forEach((group, i) => {
+      plan.phases.push(buildPhaseFromGroup(group, subtasks, i + 1, plan));
+    });
   } else {
-    // 沒有並行群組，按順序執行
-    plan.strategy = 'sequential';
-
-    for (const task of subtasks) {
-      const agent = selectAgent(task);
-      plan.agents.add(agent);
-
+    // 序列執行：每個任務一個階段
+    subtasks.forEach((task, i) => {
       plan.phases.push({
-        phase: plan.phases.length + 1,
+        phase: i + 1,
         parallel: false,
-        tasks: [{
-          id: task.id,
-          agent,
-          description: task.description,
-          inputs: task.inputs || [],
-          outputs: task.outputs || [],
-          model: AGENTS[agent]?.model || 'sonnet'
-        }]
+        tasks: [buildTask(task, plan)]
       });
-
-      plan.estimatedCost += AGENTS[agent]?.costWeight || 2;
-    }
+    });
   }
 
   plan.agents = Array.from(plan.agents);
   return plan;
 }
 
+// ============================================================
+// 指令格式化器（Phase 3 重構提取）
+// ============================================================
+
+const InstructionFormatter = {
+  BOX_WIDTH: 52,
+
+  boxLine(content) {
+    return `║ ${content}`.padEnd(this.BOX_WIDTH) + '║';
+  },
+
+  formatHeader(plan) {
+    return [
+      '',
+      '╔══════════════════════════════════════════════════╗',
+      '║           Agent Routing Plan                     ║',
+      '╠══════════════════════════════════════════════════╣',
+      this.boxLine(`Strategy: ${plan.strategy}`),
+      this.boxLine(`Phases: ${plan.phases.length}`),
+      this.boxLine(`Agents: ${plan.agents.join(', ').slice(0, 38)}`),
+      this.boxLine(`Est. Cost: ${plan.estimatedCost} units`),
+      '╠══════════════════════════════════════════════════╣'
+    ];
+  },
+
+  formatPhases(phases) {
+    const lines = [];
+    for (const phase of phases) {
+      lines.push(this.boxLine(`Phase ${phase.phase}: ${phase.parallel ? '並行' : '序列'}`));
+      for (const task of phase.tasks) {
+        lines.push(this.boxLine(`├─ [${task.agent}] ${task.description.slice(0, 33)}`));
+      }
+    }
+    return lines;
+  },
+
+  formatGuidelines() {
+    return [
+      '╠══════════════════════════════════════════════════╣',
+      '║ 執行指引                                         ║',
+      '║ 1. 按照 Phase 順序執行                           ║',
+      '║ 2. 同一 Phase 的任務可並行 (使用 Task tool)      ║',
+      '║ 3. 等待前一 Phase 完成後再開始下一 Phase         ║',
+      '║ 4. 收集所有結果後彙整回覆                        ║',
+      '╚══════════════════════════════════════════════════╝',
+      ''
+    ];
+  },
+
+  formatTaskExample(task) {
+    return [
+      `Task({`,
+      `  subagent_type: "vibe-engine-core:${task.agent}",`,
+      `  description: "${task.description.slice(0, 30)}...",`,
+      `  prompt: "${task.description}",`,
+      `  model: "${task.model}"`,
+      `})`,
+      ''
+    ];
+  },
+
+  formatExamples(phases) {
+    const lines = ['【Task 呼叫範例】', ''];
+    for (const phase of phases) {
+      lines.push(`// Phase ${phase.phase}${phase.parallel ? ' (並行執行)' : ''}`);
+      if (phase.parallel && phase.tasks.length > 1) {
+        lines.push('// 在單一訊息中使用多個 Task tool 呼叫：');
+      }
+      for (const task of phase.tasks) {
+        lines.push(...this.formatTaskExample(task));
+      }
+    }
+    return lines;
+  }
+};
+
 /**
- * 生成路由指令（供 Main Agent 使用）
+ * 生成路由指令（重構後）
  */
 function generateRoutingInstructions(plan, originalRequest) {
   if (!plan || plan.phases.length === 0) {
     return null;
   }
 
-  const lines = [];
-  lines.push('');
-  lines.push('╔══════════════════════════════════════════════════╗');
-  lines.push('║           Agent Routing Plan                     ║');
-  lines.push('╠══════════════════════════════════════════════════╣');
-  lines.push(`║ Strategy: ${plan.strategy.padEnd(38)}║`);
-  lines.push(`║ Phases: ${String(plan.phases.length).padEnd(40)}║`);
-  lines.push(`║ Agents: ${plan.agents.join(', ').padEnd(40).slice(0, 40)}║`);
-  lines.push(`║ Est. Cost: ${String(plan.estimatedCost) + ' units'.padEnd(37)}║`);
-  lines.push('╠══════════════════════════════════════════════════╣');
-
-  // 生成執行指令
-  for (const phase of plan.phases) {
-    lines.push(`║ Phase ${phase.phase}: ${phase.parallel ? '並行' : '序列'}`.padEnd(51) + '║');
-
-    for (const task of phase.tasks) {
-      lines.push(`║ ├─ [${task.agent}] ${task.description.slice(0, 35)}`.padEnd(51) + '║');
-    }
-  }
-
-  lines.push('╠══════════════════════════════════════════════════╣');
-  lines.push('║ 執行指引                                         ║');
-  lines.push('║ 1. 按照 Phase 順序執行                           ║');
-  lines.push('║ 2. 同一 Phase 的任務可並行 (使用 Task tool)      ║');
-  lines.push('║ 3. 等待前一 Phase 完成後再開始下一 Phase         ║');
-  lines.push('║ 4. 收集所有結果後彙整回覆                        ║');
-  lines.push('╚══════════════════════════════════════════════════╝');
-  lines.push('');
-
-  // 生成詳細的 Task 呼叫指令
-  lines.push('【Task 呼叫範例】');
-  lines.push('');
-
-  for (const phase of plan.phases) {
-    lines.push(`// Phase ${phase.phase}${phase.parallel ? ' (並行執行)' : ''}`);
-
-    if (phase.parallel && phase.tasks.length > 1) {
-      lines.push('// 在單一訊息中使用多個 Task tool 呼叫：');
-    }
-
-    for (const task of phase.tasks) {
-      lines.push(`Task({`);
-      lines.push(`  subagent_type: "vibe-engine-core:${task.agent}",`);
-      lines.push(`  description: "${task.description.slice(0, 30)}...",`);
-      lines.push(`  prompt: "${task.description}",`);
-      lines.push(`  model: "${task.model}"`);
-      lines.push(`})`);
-      lines.push('');
-    }
-  }
-
-  return lines.join('\n');
+  return [
+    ...InstructionFormatter.formatHeader(plan),
+    ...InstructionFormatter.formatPhases(plan.phases),
+    ...InstructionFormatter.formatGuidelines(),
+    ...InstructionFormatter.formatExamples(plan.phases)
+  ].join('\n');
 }
 
 // ============================================================
