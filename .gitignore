@@ -4,6 +4,13 @@
 .vibe-engine/memory/
 .vibe-engine/logs/
 .vibe-engine/instincts/
+.vibe-engine/usage/
+.vibe-engine/verification/
+.vibe-engine/health/
+.vibe-engine/specs/
+.vibe-engine/*.json
+.vibe-engine/*.yaml
+.vibe-engine/*.jsonl
 
 # OS files
 .DS_Store
