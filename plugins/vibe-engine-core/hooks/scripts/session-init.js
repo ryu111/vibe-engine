@@ -13,6 +13,53 @@
 const fs = require('fs');
 const path = require('path');
 
+/**
+ * 檢測開發工具配置，返回建議訊息（如缺少配置）
+ */
+function checkDevToolsConfig(cwd) {
+  // 檢測是否是 TypeScript 專案
+  const hasTsConfig = fs.existsSync(path.join(cwd, 'tsconfig.json'));
+  if (!hasTsConfig) {
+    return null; // 非 TypeScript 專案，不建議
+  }
+
+  // 檢測 ESLint 配置
+  let hasEslint = fs.existsSync(path.join(cwd, '.eslintrc.js')) ||
+                  fs.existsSync(path.join(cwd, '.eslintrc.json')) ||
+                  fs.existsSync(path.join(cwd, '.eslintrc.yaml')) ||
+                  fs.existsSync(path.join(cwd, '.eslintrc.yml')) ||
+                  fs.existsSync(path.join(cwd, 'eslint.config.js'));
+
+  // 檢測 Jest 配置
+  let hasJest = fs.existsSync(path.join(cwd, 'jest.config.js')) ||
+                fs.existsSync(path.join(cwd, 'jest.config.ts')) ||
+                fs.existsSync(path.join(cwd, 'jest.config.json'));
+
+  // 檢查 package.json 中的配置
+  const pkgPath = path.join(cwd, 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      if (pkg.eslintConfig) hasEslint = true;
+      if (pkg.jest) hasJest = true;
+    } catch (e) {
+      // 忽略 JSON 解析錯誤
+    }
+  }
+
+  // 如果都有配置，不需要建議
+  if (hasEslint && hasJest) {
+    return null;
+  }
+
+  // 生成建議訊息
+  const missing = [];
+  if (!hasEslint) missing.push('ESLint');
+  if (!hasJest) missing.push('Jest');
+
+  return `💡 偵測到 TypeScript 專案缺少 ${missing.join(' 和 ')} 配置。執行 /vibe-setup 可一鍵設置開發工具，啟用完整 /verify 驗證。`;
+}
+
 // 讀取 stdin（hook input）
 let input = '';
 process.stdin.setEncoding('utf8');
@@ -45,9 +92,17 @@ process.stdin.on('end', () => {
     const configPath = path.join(vibeEngineDir, 'config.yaml');
     let configExists = fs.existsSync(configPath);
 
+    // 檢測開發工具配置
+    const devToolsSuggestions = checkDevToolsConfig(cwd);
+
     // 輸出初始化訊息
+    let systemMessage = `Vibe Engine Core initialized. Runtime directory: ${vibeEngineDir}`;
+    if (devToolsSuggestions) {
+      systemMessage += `\n\n${devToolsSuggestions}`;
+    }
+
     const output = {
-      systemMessage: `Vibe Engine Core initialized. Runtime directory: ${vibeEngineDir}`,
+      systemMessage,
       continue: true,
       suppressOutput: false
     };
