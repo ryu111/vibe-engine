@@ -17,42 +17,11 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getProjectRoot } = require('./lib/common');
+const { readHookInput, writeHookOutput } = require('./lib/hook-io');
 
 // 配置
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '../..');
-
-/**
- * 獲取用戶專案根目錄
- * 優先使用 CWD，回退到查找 .git 或 .vibe-engine 目錄
- */
-function getProjectRoot() {
-  // 首先嘗試 CWD
-  const cwd = process.cwd();
-
-  // 如果 CWD 在 plugin cache 內，需要找到真正的專案目錄
-  if (cwd.includes('.claude/plugins/cache')) {
-    // 嘗試從環境變數獲取
-    if (process.env.CLAUDE_PROJECT_ROOT) {
-      return process.env.CLAUDE_PROJECT_ROOT;
-    }
-    // 無法確定，使用 home 目錄下的預設位置
-    return path.join(process.env.HOME || '/tmp', '.vibe-engine-global');
-  }
-
-  // 向上查找專案根目錄標記
-  let current = cwd;
-  while (current !== '/') {
-    if (fs.existsSync(path.join(current, '.git')) ||
-        fs.existsSync(path.join(current, '.vibe-engine')) ||
-        fs.existsSync(path.join(current, 'package.json'))) {
-      return current;
-    }
-    current = path.dirname(current);
-  }
-
-  return cwd;
-}
-
 const PROJECT_ROOT = getProjectRoot();
 const VIBE_ENGINE_DIR = path.join(PROJECT_ROOT, '.vibe-engine');
 const TASKS_DIR = path.join(VIBE_ENGINE_DIR, 'tasks');
@@ -579,36 +548,18 @@ function generateTaskCommands(decomposition) {
  * 主函數 - 支援 Hook 和獨立呼叫
  */
 async function main() {
-  let input = '';
-
-  // 讀取 stdin
-  if (!process.stdin.isTTY) {
-    process.stdin.setEncoding('utf8');
-
-    await new Promise((resolve) => {
-      process.stdin.on('data', (chunk) => { input += chunk; });
-      process.stdin.on('end', resolve);
-    });
-  }
+  // 使用 lib/hook-io 讀取輸入
+  const { hookInput, isHook, rawInput } = await readHookInput();
 
   try {
     let prompt = '';
     let classificationResult = null;
-    let isHook = false;
 
-    // 嘗試解析為 Hook input
-    if (input.trim()) {
-      try {
-        const hookInput = JSON.parse(input);
-        if (hookInput.user_prompt) {
-          prompt = hookInput.user_prompt;
-          classificationResult = hookInput.hookSpecificOutput; // 來自 prompt-classifier
-          isHook = true;
-        }
-      } catch {
-        // 不是 JSON，當作純文字 prompt
-        prompt = input.trim();
-      }
+    if (hookInput?.user_prompt) {
+      prompt = hookInput.user_prompt;
+      classificationResult = hookInput.hookSpecificOutput;
+    } else if (rawInput) {
+      prompt = rawInput;
     }
 
     // 如果沒有 prompt，從命令列參數讀取
@@ -617,10 +568,7 @@ async function main() {
     }
 
     if (!prompt) {
-      console.log(JSON.stringify({
-        continue: true,
-        error: 'No prompt provided'
-      }));
+      writeHookOutput({ continue: true, error: 'No prompt provided' });
       return;
     }
 
@@ -659,7 +607,7 @@ Use the Task tool to execute subtasks in parallel where possible.
 Plan saved to: ${saveResult.filePath || 'memory'}`;
       }
 
-      console.log(JSON.stringify(output));
+      writeHookOutput(output);
     } else {
       // 獨立執行輸出
       console.log('\n═══════════════════════════════════════════════════');
@@ -690,10 +638,7 @@ Plan saved to: ${saveResult.filePath || 'memory'}`;
     }
 
   } catch (error) {
-    console.log(JSON.stringify({
-      continue: true,
-      error: error.message
-    }));
+    writeHookOutput({ continue: true, error: error.message });
   }
 }
 

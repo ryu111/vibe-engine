@@ -13,6 +13,7 @@
 const { execSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { readHookInput, writeHookOutput } = require('./lib/hook-io');
 
 // 配置
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '../..');
@@ -381,25 +382,8 @@ function generateProgressReport(verification, components) {
  * 主函數
  */
 async function main() {
-  // 檢查是否從 stdin 接收 hook input
-  let hookInput = null;
-
-  if (!process.stdin.isTTY) {
-    let input = '';
-    process.stdin.setEncoding('utf8');
-
-    await new Promise((resolve) => {
-      process.stdin.on('data', (chunk) => { input += chunk; });
-      process.stdin.on('end', () => {
-        try {
-          hookInput = JSON.parse(input);
-        } catch (e) {
-          // 不是 JSON，可能是直接呼叫
-        }
-        resolve();
-      });
-    });
-  }
+  // 使用 lib/hook-io 讀取輸入
+  const { isHook } = await readHookInput();
 
   // 執行驗證
   console.error('[Auto Progress] Running verification...');
@@ -423,15 +407,13 @@ async function main() {
   const progressReport = generateProgressReport(verification, components);
 
   // 如果是 hook 呼叫，輸出 hook response
-  if (hookInput) {
-    const output = {
+  if (isHook) {
+    writeHookOutput({
       continue: true,
       suppressOutput: false,
       systemMessage: progressReport
-    };
-    console.log(JSON.stringify(output));
+    });
   } else {
-    // 直接呼叫，輸出報告
     console.log(progressReport);
   }
 }

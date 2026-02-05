@@ -19,40 +19,14 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync, spawn } = require('child_process');
+const { getProjectRoot } = require('./lib/common');
+const { readHookInput, writeHookOutput, buildSuccessOutput } = require('./lib/hook-io');
 
 // ============================================================
 // 配置
 // ============================================================
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '../..');
-
-/**
- * 獲取用戶專案根目錄
- */
-function getProjectRoot() {
-  if (process.env.CLAUDE_PROJECT_ROOT) {
-    return process.env.CLAUDE_PROJECT_ROOT;
-  }
-
-  const cwd = process.cwd();
-
-  if (cwd.includes('.claude/plugins/cache')) {
-    return path.join(process.env.HOME || '/tmp', '.vibe-engine-global');
-  }
-
-  let current = cwd;
-  while (current !== '/') {
-    if (fs.existsSync(path.join(current, '.git')) ||
-        fs.existsSync(path.join(current, '.vibe-engine')) ||
-        fs.existsSync(path.join(current, 'package.json'))) {
-      return current;
-    }
-    current = path.dirname(current);
-  }
-
-  return cwd;
-}
-
 const PROJECT_ROOT = getProjectRoot();
 const VIBE_ENGINE_DIR = path.join(PROJECT_ROOT, '.vibe-engine');
 const VERIFICATION_DIR = path.join(VIBE_ENGINE_DIR, 'verification');
@@ -782,43 +756,19 @@ function formatReportForDisplay(report) {
 // ============================================================
 
 async function main() {
-  // 檢查是否從 stdin 接收 hook input
-  let hookInput = null;
-
-  if (!process.stdin.isTTY) {
-    let input = '';
-    process.stdin.setEncoding('utf8');
-
-    await new Promise((resolve) => {
-      process.stdin.on('data', (chunk) => { input += chunk; });
-      process.stdin.on('end', () => {
-        if (input.trim()) {
-          try {
-            hookInput = JSON.parse(input);
-          } catch (e) {
-            // 不是 JSON，可能是直接呼叫
-          }
-        }
-        resolve();
-      });
-
-      // 超時處理
-      setTimeout(resolve, 100);
-    });
-  }
+  // 使用 lib/hook-io 讀取 hook 輸入
+  const { hookInput, isHook } = await readHookInput();
 
   // 從命令列參數或 hook input 取得選項
   const args = process.argv.slice(2);
   let options = {};
 
   if (hookInput) {
-    // 從 Stop hook 觸發
     options = {
       originalRequest: hookInput.transcript_summary || '',
       changeType: hookInput.change_type || 'general'
     };
   } else if (args.includes('--level')) {
-    // 命令列指定層級
     const levelIndex = args.indexOf('--level');
     options.level = args[levelIndex + 1] || 'standard';
   }
@@ -827,27 +777,22 @@ async function main() {
   const report = await runVerification(options);
 
   // 輸出結果
-  if (hookInput) {
-    // Hook 呼叫：輸出 hook response
+  if (isHook) {
     const displayReport = formatReportForDisplay(report);
     const isBlocking = report.verification_report.status === 'fail';
     const blockingCount = report.verification_report.blocking_issues?.length || 0;
 
-    // 使用 Forced Eval Pattern 強制語言
     let systemMessage = displayReport;
     if (isBlocking) {
       systemMessage = `⛔ CRITICAL: Verification FAILED - ${blockingCount} blocking issue(s) detected.\n\nMUST fix the following before proceeding:\n${report.verification_report.blocking_issues.map(i => `  - ${i}`).join('\n')}\n\n⛔ BLOCK: 未修復 blocking issues 禁止標記任務完成。\n\n${displayReport}`;
     }
 
-    const output = {
+    writeHookOutput({
       continue: !isBlocking,
       stopReason: isBlocking ? `⛔ CRITICAL: Verification failed with ${blockingCount} blocking issues` : undefined,
       systemMessage
-    };
-
-    console.log(JSON.stringify(output));
+    });
   } else {
-    // 直接呼叫：輸出報告
     console.log(formatReportForDisplay(report));
   }
 }
