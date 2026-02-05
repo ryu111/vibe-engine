@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "vibe-engine-guarantee",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "description": "Vibe Engine 保障模組 - 提供錯誤恢復、自動修復循環、健康檢查等能力，確保任務可靠完成",
   "owner": {
     "name": "Vibe Engine Team"
