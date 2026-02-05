@@ -18,6 +18,7 @@ const { readJSONL, writeJSONL } = require('./lib/jsonl');
 const { MemoryStore } = require('./lib/memory-store');
 const { MEMORY_TYPES, MEMORY_SOURCES } = require('./lib/memory-item');
 const { INITIAL_CONFIDENCE } = require('./lib/confidence');
+const { TaskState } = require('./lib/task-state');
 
 /**
  * 獲取觀察統計
@@ -135,6 +136,65 @@ function consolidateMemories(store, candidates) {
 }
 
 /**
+ * 從觀察推斷任務狀態
+ *
+ * @param {Array} observations - 觀察列表
+ * @param {object} existingState - 現有任務狀態
+ * @returns {object} - 任務狀態
+ */
+function inferTaskState(observations, existingState = {}) {
+  const state = {
+    current_task: existingState.current_task || '',
+    pending: existingState.pending || [],
+    completed_recently: existingState.completed_recently || [],
+    blockers: existingState.blockers || [],
+    resume_hint: ''
+  };
+
+  // 從最近的觀察推斷
+  const recentObs = observations.slice(-20);
+
+  // 1. 識別完成的任務（成功的 Edit/Write 操作）
+  const completedFiles = [];
+  for (const obs of recentObs) {
+    if (['Edit', 'Write'].includes(obs.tool_name) && obs.outcome === 'success') {
+      const filePath = obs.tool_input?.file_path;
+      if (filePath) {
+        completedFiles.push(path.basename(filePath));
+      }
+    }
+  }
+
+  if (completedFiles.length > 0) {
+    const uniqueFiles = [...new Set(completedFiles)];
+    const summary = uniqueFiles.length <= 3
+      ? uniqueFiles.join(', ')
+      : `${uniqueFiles.slice(0, 3).join(', ')} 等 ${uniqueFiles.length} 個檔案`;
+    state.completed_recently = [`修改了 ${summary}`, ...state.completed_recently].slice(0, 5);
+  }
+
+  // 2. 識別失敗/阻塞（失敗的操作）
+  const failures = recentObs.filter(o => o.outcome === 'failure');
+  if (failures.length > 0) {
+    const lastFailure = failures[failures.length - 1];
+    if (lastFailure.tool_result_summary) {
+      state.blockers = [`${lastFailure.tool_name}: ${lastFailure.tool_result_summary.slice(0, 50)}`];
+    }
+  }
+
+  // 3. 生成 resume_hint
+  if (state.blockers.length > 0) {
+    state.resume_hint = '上次有操作失敗，可能需要檢查';
+  } else if (state.pending.length > 0) {
+    state.resume_hint = `繼續: ${state.pending[0]}`;
+  } else if (completedFiles.length > 0) {
+    state.resume_hint = '上次修改了一些檔案，可以繼續後續工作';
+  }
+
+  return state;
+}
+
+/**
  * 清理已處理的觀察
  *
  * @param {string} observationsFile - 觀察檔案路徑
@@ -200,6 +260,12 @@ async function main() {
 
       // 清理舊觀察
       cleanupObservations(paths.observations, 100);
+
+      // 保存任務狀態
+      const taskState = new TaskState(projectRoot);
+      const existingState = taskState.load() || {};
+      const inferredState = inferTaskState(observations, existingState);
+      taskState.save(inferredState);
 
       // 構建訊息
       messageParts.push(`[Memory Consolidation] Session: ${stats.count} observations`);

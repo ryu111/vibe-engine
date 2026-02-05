@@ -16,6 +16,7 @@ const { getProjectRoot, ensureVibeEngineDirs } = require('./lib/common');
 const { MemoryStore } = require('./lib/memory-store');
 const { formatMemoryItem, MEMORY_TYPES } = require('./lib/memory-item');
 const { THRESHOLDS, getConfidenceIcon } = require('./lib/confidence');
+const { TaskState } = require('./lib/task-state');
 
 /**
  * 載入高信心記憶並格式化為注入字串
@@ -144,6 +145,10 @@ async function main() {
     // 載入活躍 Instincts
     const instincts = loadActiveInstincts(paths.instincts);
 
+    // 載入任務狀態
+    const taskState = new TaskState(projectRoot);
+    const taskPrompt = taskState.formatForPrompt();
+
     // 獲取統計
     const stats = store.getStats();
 
@@ -168,8 +173,13 @@ async function main() {
       messageParts.push(`(total: ${stats.total} in store)`);
     }
 
-    if (messageParts.length > 0) {
+    if (messageParts.length > 0 || taskPrompt) {
       output.systemMessage = messageParts.join(' | ');
+
+      // 如果有任務狀態，優先顯示（接續提示）
+      if (taskPrompt) {
+        output.systemMessage += '\n\n' + taskPrompt;
+      }
 
       // 如果有高信心記憶，注入到 context
       if (formatted) {
