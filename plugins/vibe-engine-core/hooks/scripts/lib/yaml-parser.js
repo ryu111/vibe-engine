@@ -6,11 +6,12 @@
  * - 嵌套對象 (縮進)
  * - 基本類型 (string, number, boolean)
  * - 美元符號數字 ($1.00)
+ * - 陣列 (- item)
+ * - 物件陣列 (- key: value)
  *
  * 不支援：
- * - 陣列 (- item)
  * - 多行字串
- * - 複雜類型
+ * - 流式陣列 [a, b, c]
  *
  * 對應章節：Ch6 資源管理
  */
@@ -64,7 +65,36 @@ function setNestedValue(obj, path, key, value) {
 }
 
 /**
- * 簡單 YAML 解析
+ * 獲取或創建嵌套路徑的容器
+ */
+function getOrCreateContainer(obj, path) {
+  let current = obj;
+  for (const p of path) {
+    if (typeof p === 'number') {
+      // 陣列索引
+      current = current[p];
+    } else {
+      current = current[p];
+    }
+  }
+  return current;
+}
+
+/**
+ * 在指定路徑設置值（支援陣列）
+ */
+function setValueAtPath(obj, path, key, value) {
+  let current = obj;
+  for (const p of path) {
+    current = current[p];
+  }
+  if (key !== null) {
+    current[key] = value;
+  }
+}
+
+/**
+ * 簡單 YAML 解析（支援陣列）
  * @param {string} content - YAML 內容
  * @returns {object} 解析後的對象
  */
@@ -75,8 +105,9 @@ function parseSimpleYaml(content) {
 
   const result = {};
   const lines = content.split('\n');
-  let currentPath = [];
-  let currentIndent = 0;
+
+  // 追蹤結構：[{ indent, key, isArray, container }]
+  const stack = [{ indent: -2, key: null, isArray: false, container: result }];
 
   for (const line of lines) {
     // 跳過空行和註解
@@ -87,25 +118,79 @@ function parseSimpleYaml(content) {
     const indent = line.search(/\S/);
     const lineContent = line.trim();
 
-    // 縮進減少時，調整當前路徑
-    if (indent < currentIndent) {
-      const levels = Math.floor(indent / 2);
-      currentPath = currentPath.slice(0, levels);
+    // 根據縮進調整 stack
+    while (stack.length > 1 && indent <= stack[stack.length - 1].indent) {
+      stack.pop();
     }
-    currentIndent = indent;
 
-    // 解析鍵值對
-    if (lineContent.includes(':')) {
+    const parent = stack[stack.length - 1];
+
+    // 處理陣列項 (- ...)
+    if (lineContent.startsWith('- ')) {
+      const itemContent = lineContent.slice(2).trim();
+
+      // 確保父容器是陣列
+      if (!Array.isArray(parent.container)) {
+        continue; // 跳過格式錯誤
+      }
+
+      // 檢查是否為 JSON 陣列 (- ["item1", "item2"])
+      if (itemContent.startsWith('[') && itemContent.endsWith(']')) {
+        try {
+          const jsonArray = JSON.parse(itemContent);
+          parent.container.push(jsonArray);
+          continue;
+        } catch {
+          // 不是有效 JSON，繼續正常處理
+        }
+      }
+
+      // 檢查是否為 - key: value 格式
+      if (itemContent.includes(':')) {
+        const colonIndex = itemContent.indexOf(':');
+        const key = itemContent.slice(0, colonIndex).trim();
+        const value = itemContent.slice(colonIndex + 1).trim();
+
+        const newItem = {};
+        if (value === '' || value === '[]') {
+          // 物件陣列項開始，或空陣列
+          newItem[key] = value === '[]' ? [] : undefined;
+        } else {
+          newItem[key] = parseYamlValue(value);
+        }
+
+        parent.container.push(newItem);
+        stack.push({ indent, key, isArray: false, container: newItem });
+      } else {
+        // 簡單值陣列項
+        parent.container.push(parseYamlValue(itemContent));
+      }
+    }
+    // 處理鍵值對
+    else if (lineContent.includes(':')) {
       const colonIndex = lineContent.indexOf(':');
       const key = lineContent.slice(0, colonIndex).trim();
       const value = lineContent.slice(colonIndex + 1).trim();
 
       if (value === '') {
-        // 嵌套對象開始
-        currentPath.push(key);
+        // 嵌套結構開始 - 檢查下一行是否為陣列
+        const nextLineIndex = lines.indexOf(line) + 1;
+        const nextLine = lines.slice(nextLineIndex).find(l => l.trim() !== '' && !l.trim().startsWith('#'));
+        const isNextArray = nextLine && nextLine.trim().startsWith('- ');
+
+        if (isNextArray) {
+          parent.container[key] = [];
+          stack.push({ indent, key, isArray: true, container: parent.container[key] });
+        } else {
+          parent.container[key] = {};
+          stack.push({ indent, key, isArray: false, container: parent.container[key] });
+        }
+      } else if (value === '[]') {
+        // 空陣列
+        parent.container[key] = [];
       } else {
-        // 鍵值對
-        setNestedValue(result, currentPath, key, parseYamlValue(value));
+        // 普通鍵值對
+        parent.container[key] = parseYamlValue(value);
       }
     }
   }
