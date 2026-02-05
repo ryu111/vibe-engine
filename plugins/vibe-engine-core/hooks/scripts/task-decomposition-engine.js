@@ -19,6 +19,7 @@ const fs = require('fs');
 const path = require('path');
 const { getProjectRoot } = require('./lib/common');
 const { readHookInput, writeHookOutput } = require('./lib/hook-io');
+const { jsonToYaml } = require('./lib/yaml-parser');
 
 // 配置
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '../..');
@@ -459,57 +460,6 @@ function saveDecomposition(decomposition, taskId = null) {
   } catch (error) {
     return { success: false, error: error.message };
   }
-}
-
-/**
- * 簡單的 JSON to YAML 轉換
- */
-function jsonToYaml(obj, indent = 0) {
-  const spaces = '  '.repeat(indent);
-  let yaml = '';
-
-  for (const [key, value] of Object.entries(obj)) {
-    if (Array.isArray(value)) {
-      yaml += `${spaces}${key}:\n`;
-      for (const item of value) {
-        if (typeof item === 'object' && item !== null) {
-          // 檢查是否為簡單的字串陣列
-          if (Array.isArray(item)) {
-            // 巢狀陣列（如 parallel_groups）
-            yaml += `${spaces}  - [${item.map(i => JSON.stringify(i)).join(', ')}]\n`;
-          } else {
-            // 物件陣列
-            const entries = Object.entries(item);
-            yaml += `${spaces}  - ${entries[0][0]}: ${JSON.stringify(entries[0][1])}\n`;
-            for (let i = 1; i < entries.length; i++) {
-              const [k, v] = entries[i];
-              if (Array.isArray(v)) {
-                if (v.length === 0) {
-                  yaml += `${spaces}    ${k}: []\n`;
-                } else {
-                  yaml += `${spaces}    ${k}:\n`;
-                  for (const vi of v) {
-                    yaml += `${spaces}      - ${JSON.stringify(vi)}\n`;
-                  }
-                }
-              } else {
-                yaml += `${spaces}    ${k}: ${JSON.stringify(v)}\n`;
-              }
-            }
-          }
-        } else {
-          yaml += `${spaces}  - ${JSON.stringify(item)}\n`;
-        }
-      }
-    } else if (typeof value === 'object' && value !== null) {
-      yaml += `${spaces}${key}:\n`;
-      yaml += jsonToYaml(value, indent + 1);
-    } else {
-      yaml += `${spaces}${key}: ${JSON.stringify(value)}\n`;
-    }
-  }
-
-  return yaml;
 }
 
 /**

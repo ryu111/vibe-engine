@@ -114,7 +114,7 @@ function parseSimpleYaml(content) {
 }
 
 /**
- * 將對象轉換為 YAML 字串
+ * 將對象轉換為 YAML 字串（簡單版，不支援陣列）
  * @param {object} obj - 要轉換的對象
  * @param {number} indent - 當前縮進級別
  * @returns {string} YAML 字串
@@ -143,8 +143,62 @@ function stringifyYaml(obj, indent = 0) {
   return lines.join('\n');
 }
 
+/**
+ * 將 JSON 物件轉換為 YAML 字串（完整版，支援陣列）
+ * @param {object} obj - 要轉換的對象
+ * @param {number} indent - 當前縮進級別
+ * @returns {string} YAML 字串
+ */
+function jsonToYaml(obj, indent = 0) {
+  const spaces = '  '.repeat(indent);
+  let yaml = '';
+
+  for (const [key, value] of Object.entries(obj)) {
+    if (Array.isArray(value)) {
+      yaml += `${spaces}${key}:\n`;
+      for (const item of value) {
+        if (typeof item === 'object' && item !== null) {
+          if (Array.isArray(item)) {
+            // 巢狀陣列（如 parallel_groups）
+            yaml += `${spaces}  - [${item.map(i => JSON.stringify(i)).join(', ')}]\n`;
+          } else {
+            // 物件陣列
+            const entries = Object.entries(item);
+            yaml += `${spaces}  - ${entries[0][0]}: ${JSON.stringify(entries[0][1])}\n`;
+            for (let i = 1; i < entries.length; i++) {
+              const [k, v] = entries[i];
+              if (Array.isArray(v)) {
+                if (v.length === 0) {
+                  yaml += `${spaces}    ${k}: []\n`;
+                } else {
+                  yaml += `${spaces}    ${k}:\n`;
+                  for (const vi of v) {
+                    yaml += `${spaces}      - ${JSON.stringify(vi)}\n`;
+                  }
+                }
+              } else {
+                yaml += `${spaces}    ${k}: ${JSON.stringify(v)}\n`;
+              }
+            }
+          }
+        } else {
+          yaml += `${spaces}  - ${JSON.stringify(item)}\n`;
+        }
+      }
+    } else if (typeof value === 'object' && value !== null) {
+      yaml += `${spaces}${key}:\n`;
+      yaml += jsonToYaml(value, indent + 1);
+    } else {
+      yaml += `${spaces}${key}: ${JSON.stringify(value)}\n`;
+    }
+  }
+
+  return yaml;
+}
+
 module.exports = {
   parseSimpleYaml,
   parseYamlValue,
-  stringifyYaml
+  stringifyYaml,
+  jsonToYaml
 };

@@ -21,6 +21,7 @@ const path = require('path');
 const { execSync, spawn } = require('child_process');
 const { getProjectRoot } = require('./lib/common');
 const { readHookInput, writeHookOutput, buildSuccessOutput } = require('./lib/hook-io');
+const { createBoxedReport, formatKeyValue, formatStatusIcon } = require('./lib/report-formatter');
 
 // ============================================================
 // 配置
@@ -682,73 +683,63 @@ async function runVerification(options = {}) {
 }
 
 /**
- * 格式化報告為人類可讀格式
+ * 格式化報告為人類可讀格式（使用 lib/report-formatter）
  */
 function formatReportForDisplay(report) {
   const r = report.verification_report;
-  const lines = [];
 
-  // 標題
-  const statusIcon = r.status === 'pass' ? '✅' : r.status === 'fail' ? '❌' : '⚠️';
-  lines.push('');
-  lines.push('╔══════════════════════════════════════════════════╗');
-  lines.push('║            Verification Report                   ║');
-  lines.push('╠══════════════════════════════════════════════════╣');
-  lines.push(`║ Status: ${statusIcon} ${r.status.toUpperCase().padEnd(39)}║`);
-  lines.push(`║ Level: ${r.level.padEnd(41)}║`);
-  lines.push(`║ Project: ${r.project_type.padEnd(39)}║`);
-  lines.push(`║ Budget Remaining: ${r.budget_remaining.padEnd(30)}║`);
-  lines.push('╠══════════════════════════════════════════════════╣');
-  lines.push('║ Layer Results                                    ║');
+  // 建立區段
+  const sections = [];
 
-  // 各層結果
+  // 基本資訊區段
+  sections.push({
+    title: null,
+    lines: [
+      formatKeyValue('Status', `${formatStatusIcon(r.status)} ${r.status.toUpperCase()}`),
+      formatKeyValue('Level', r.level),
+      formatKeyValue('Project', r.project_type),
+      formatKeyValue('Budget', r.budget_remaining)
+    ]
+  });
+
+  // Layer Results 區段
+  const layerLines = [];
   for (const [layerName, layer] of Object.entries(r.layers)) {
-    const layerIcon = layer.status === 'pass' ? '✅' : layer.status === 'fail' ? '❌' : layer.status === 'skip' ? '⏭️' : '⏳';
-    lines.push(`║ ${layerIcon} ${layerName.padEnd(46)}║`);
-
+    const layerIcon = formatStatusIcon(layer.status === 'skip' ? 'info' : layer.status);
+    layerLines.push(`${layerIcon} ${layerName}`);
     for (const check of layer.checks) {
-      const checkIcon = check.status === 'pass' ? '✓' : check.status === 'fail' ? '✗' : check.status === 'skip' ? '-' : '?';
-      lines.push(`║   ${checkIcon} ${check.name} [${check.priority}]`.padEnd(51) + '║');
+      const checkIcon = check.status === 'pass' ? '✓' : check.status === 'fail' ? '✗' : '-';
+      layerLines.push(`  ${checkIcon} ${check.name} [${check.priority}]`);
     }
   }
+  sections.push({ title: 'Layer Results', lines: layerLines });
 
-  // Blocking issues
-  if (r.blocking_issues.length > 0) {
-    lines.push('╠══════════════════════════════════════════════════╣');
-    lines.push('║ ❌ Blocking Issues                                ║');
-    for (const issue of r.blocking_issues) {
-      const truncated = issue.length > 48 ? issue.substring(0, 45) + '...' : issue;
-      lines.push(`║   ${truncated}`.padEnd(51) + '║');
-    }
+  // Blocking Issues 區段
+  if (r.blocking_issues?.length > 0) {
+    sections.push({
+      title: '❌ Blocking Issues',
+      lines: r.blocking_issues.map(i => i.length > 45 ? i.substring(0, 42) + '...' : i)
+    });
   }
 
-  // Warnings
-  if (r.warnings.length > 0) {
-    lines.push('╠══════════════════════════════════════════════════╣');
-    lines.push('║ ⚠️  Warnings                                      ║');
-    for (const warn of r.warnings.slice(0, 3)) {
-      const truncated = warn.length > 48 ? warn.substring(0, 45) + '...' : warn;
-      lines.push(`║   ${truncated}`.padEnd(51) + '║');
-    }
+  // Warnings 區段
+  if (r.warnings?.length > 0) {
+    const warnLines = r.warnings.slice(0, 3).map(w => w.length > 45 ? w.substring(0, 42) + '...' : w);
     if (r.warnings.length > 3) {
-      lines.push(`║   ... and ${r.warnings.length - 3} more`.padEnd(51) + '║');
+      warnLines.push(`... and ${r.warnings.length - 3} more`);
     }
+    sections.push({ title: '⚠️ Warnings', lines: warnLines });
   }
 
-  // Recommendations
-  if (r.recommendations.length > 0) {
-    lines.push('╠══════════════════════════════════════════════════╣');
-    lines.push('║ 💡 Recommendations                               ║');
-    for (const rec of r.recommendations) {
-      const truncated = rec.length > 48 ? rec.substring(0, 45) + '...' : rec;
-      lines.push(`║   ${truncated}`.padEnd(51) + '║');
-    }
+  // Recommendations 區段
+  if (r.recommendations?.length > 0) {
+    sections.push({
+      title: '💡 Recommendations',
+      lines: r.recommendations.map(rec => rec.length > 45 ? rec.substring(0, 42) + '...' : rec)
+    });
   }
 
-  lines.push('╚══════════════════════════════════════════════════╝');
-  lines.push('');
-
-  return lines.join('\n');
+  return '\n' + createBoxedReport('Verification Report', sections) + '\n';
 }
 
 // ============================================================

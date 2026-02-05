@@ -14,6 +14,7 @@ const { execSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { readHookInput, writeHookOutput } = require('./lib/hook-io');
+const { createBoxedReport, formatKeyValue, formatTree, formatStatusIcon } = require('./lib/report-formatter');
 
 // 配置
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '../..');
@@ -251,7 +252,7 @@ ${verification.success
 }
 
 /**
- * 生成進度摘要報告
+ * 生成進度摘要報告（使用 lib/report-formatter）
  */
 function generateProgressReport(verification, components) {
   // 計算統計
@@ -266,116 +267,90 @@ function generateProgressReport(verification, components) {
   const totalScaffold = stats.agents.scaffold + stats.skills.scaffold + stats.commands.scaffold + stats.hooks.scaffold;
   const totalComponents = stats.agents.total + stats.skills.total + stats.commands.total + stats.hooks.total;
 
-  // 計算兩種完成度
-  // 結構完成度 = 所有檔案都有內容
   const structurePercent = Math.round(totalDone / totalComponents * 100);
-  // 功能完成度 = 只計算可執行組件 (hooks)，其他為文檔指南
-  const functionalComponents = stats.hooks.done; // 只有 hooks 是真正可執行的
-  const functionalTotal = stats.hooks.total;
-  const functionalPercent = Math.round(functionalComponents / functionalTotal * 100);
-
-  // 找出需要補充的組件
-  const needsWork = [];
-  components.agents.filter(a => a.exists && !a.hasContent).forEach(a => needsWork.push(`agents/${a.name}.md`));
-  components.skills.filter(s => s.exists && !s.hasContent).forEach(s => needsWork.push(`skills/${s.name}`));
-  components.commands.filter(c => c.exists && !c.hasContent).forEach(c => needsWork.push(`commands/${c.name}.md`));
-  components.hooks.filter(h => h.exists && !h.hasContent).forEach(h => needsWork.push(`hooks/${h.name}.js`));
-
-  // 生成報告
-  const lines = [
-    '',
-    '╔══════════════════════════════════════════════════╗',
-    '║          Vibe Engine Session Summary             ║',
-    '╠══════════════════════════════════════════════════╣',
-  ];
-
-  // 根據驗證狀態顯示不同訊息
-  if (verification.skipped) {
-    lines.push('║ 驗證結果: ⏭️  SKIPPED (非 plugin 開發專案)        ║');
-  } else {
-    lines.push(`║ 驗證結果: ${verification.success ? '✅ PASS' : '❌ FAIL'} (${verification.passed}/${verification.passed + verification.failed})`);
-  }
-
-  lines.push('╠══════════════════════════════════════════════════╣');
-  lines.push('║ 完成度                                           ║');
-  lines.push(`║ ├─ 結構: ${structurePercent}% (${totalDone}/${totalComponents} 檔案有內容)`);
-  lines.push(`║ └─ 功能: ${functionalPercent}% (${functionalComponents}/${functionalTotal} hooks 可執行)`);
-  lines.push('╠══════════════════════════════════════════════════╣');
-  lines.push('║ 組件狀態                                         ║');
-  lines.push(`║ ├─ Agents:   ${stats.agents.done}/${stats.agents.total} 文檔${stats.agents.scaffold > 0 ? ` (${stats.agents.scaffold} 待補)` : ''}`);
-  lines.push(`║ ├─ Skills:   ${stats.skills.done}/${stats.skills.total} 指南${stats.skills.scaffold > 0 ? ` (${stats.skills.scaffold} 待補)` : ''}`);
-  lines.push(`║ ├─ Commands: ${stats.commands.done}/${stats.commands.total} 文檔${stats.commands.scaffold > 0 ? ` (${stats.commands.scaffold} 待補)` : ''}`);
-  lines.push(`║ └─ Hooks:    ${stats.hooks.done}/${stats.hooks.total} 可執行${stats.hooks.scaffold > 0 ? ` (${stats.hooks.scaffold} 待補)` : ''}`);
-
-  if (needsWork.length > 0 && needsWork.length <= 5) {
-    lines.push('╠══════════════════════════════════════════════════╣');
-    lines.push('║ 待補充                                           ║');
-    needsWork.forEach(item => lines.push(`║ └─ ${item}`));
-  }
+  const functionalPercent = Math.round(stats.hooks.done / stats.hooks.total * 100);
 
   // 核心引擎狀態
   const engines = [
-    { name: 'Task Decomposition Engine', file: 'task-decomposition-engine.js', desc: '自動分解任務' },
-    { name: 'Budget Tracker Engine', file: 'budget-tracker-engine.js', desc: 'Token 追蹤' },
-    { name: 'Verification Engine', file: 'verification-engine.js', desc: '自動化驗證' },
-    { name: 'Agent Router', file: 'agent-router.js', desc: '根據分類派發 Task' }
-  ];
-
-  const engineStatus = engines.map(e => {
+    { name: 'Task Decomposition', file: 'task-decomposition-engine.js' },
+    { name: 'Budget Tracker', file: 'budget-tracker-engine.js' },
+    { name: 'Verification Engine', file: 'verification-engine.js' },
+    { name: 'Agent Router', file: 'agent-router.js' }
+  ].map(e => {
     const filePath = path.join(PLUGIN_ROOT, 'hooks/scripts', e.file);
     const exists = fs.existsSync(filePath);
-    let hasContent = false;
-    if (exists) {
-      const content = fs.readFileSync(filePath, 'utf8');
-      hasContent = content.length > 500 && (content.match(/TODO/g) || []).length < 3;
-    }
-    return { ...e, exists, hasContent, status: hasContent ? '✅' : '⬜' };
+    const hasContent = exists && fs.readFileSync(filePath, 'utf8').length > 500;
+    return { ...e, hasContent };
   });
 
-  const pendingEngines = engineStatus.filter(e => !e.hasContent);
-  const completedEngines = engineStatus.filter(e => e.hasContent);
+  const completedEngines = engines.filter(e => e.hasContent).length;
 
-  lines.push('╠══════════════════════════════════════════════════╣');
-  lines.push('║ 核心引擎                                         ║');
+  // 建立區段
+  const sections = [];
 
-  for (let i = 0; i < engineStatus.length; i++) {
-    const e = engineStatus[i];
-    const prefix = i === engineStatus.length - 1 ? '└─' : '├─';
-    const statusIcon = e.hasContent ? '✅' : '⬜';
-    lines.push(`║ ${prefix} ${statusIcon} ${e.name.padEnd(25)} (${e.desc})`.slice(0, 54) + '║');
-  }
+  // 驗證結果區段
+  const verifyStatus = verification.skipped
+    ? '⏭️ SKIPPED (非 plugin 開發專案)'
+    : `${formatStatusIcon(verification.success ? 'pass' : 'fail')} ${verification.success ? 'PASS' : 'FAIL'} (${verification.passed}/${verification.passed + verification.failed})`;
+  sections.push({ title: null, lines: [formatKeyValue('驗證結果', verifyStatus)] });
 
-  lines.push('╠══════════════════════════════════════════════════╣');
-  lines.push('║ 可用命令                                         ║');
-  lines.push('║ ├─ /status  查看系統狀態                         ║');
-  lines.push('║ ├─ /verify  執行驗證協議                         ║');
-  lines.push('║ ├─ /budget  查看預算使用                         ║');
-  lines.push('║ └─ /spec    生成規格檔案                         ║');
-  lines.push('╠══════════════════════════════════════════════════╣');
-  lines.push('║ 下一步建議                                       ║');
+  // 完成度區段
+  sections.push({
+    title: '完成度',
+    lines: formatTree([
+      { label: '結構', value: `${structurePercent}% (${totalDone}/${totalComponents})` },
+      { label: '功能', value: `${functionalPercent}% (${stats.hooks.done}/${stats.hooks.total} hooks)`, isLast: true }
+    ])
+  });
 
+  // 組件狀態區段
+  const formatStat = (s, suffix) => `${s.done}/${s.total} ${suffix}${s.scaffold > 0 ? ` (${s.scaffold} 待補)` : ''}`;
+  sections.push({
+    title: '組件狀態',
+    lines: formatTree([
+      { label: 'Agents', value: formatStat(stats.agents, '文檔') },
+      { label: 'Skills', value: formatStat(stats.skills, '指南') },
+      { label: 'Commands', value: formatStat(stats.commands, '文檔') },
+      { label: 'Hooks', value: formatStat(stats.hooks, '可執行'), isLast: true }
+    ])
+  });
+
+  // 核心引擎區段
+  sections.push({
+    title: '核心引擎',
+    lines: formatTree(engines.map((e, i) => ({
+      label: e.name,
+      value: e.hasContent ? '✅' : '⬜',
+      isLast: i === engines.length - 1
+    })))
+  });
+
+  // 可用命令區段
+  sections.push({
+    title: '可用命令',
+    lines: formatTree([
+      { label: '/status', value: '查看系統狀態' },
+      { label: '/verify', value: '執行驗證協議' },
+      { label: '/budget', value: '查看預算使用' },
+      { label: '/spec', value: '生成規格檔案', isLast: true }
+    ])
+  });
+
+  // 下一步建議區段
+  let nextSteps;
   if (!verification.success) {
-    lines.push('║ └─ 修復驗證失敗的項目                            ║');
-  } else if (totalScaffold > 0) {
-    lines.push('║ ├─ 補充 skill 實際邏輯                           ║');
-    lines.push('║ └─ 在其他專案測試載入                            ║');
-  } else if (pendingEngines.length > 0) {
-    const nextEngine = pendingEngines[0];
-    lines.push(`║ ├─ 實作 ${nextEngine.name}`.padEnd(53) + '║');
-    lines.push('║ ├─ 建立 P1 plugins (guarantee, memory)           ║');
-    lines.push('║ └─ 在其他專案測試載入                            ║');
+    nextSteps = ['修復驗證失敗的項目'];
+  } else if (completedEngines === 4) {
+    nextSteps = ['建立 P1 plugins', '在其他專案測試', `🎉 Core complete (${completedEngines}/4)`];
   } else {
-    lines.push('║ ├─ 建立 P1 plugins (guarantee, memory)           ║');
-    lines.push('║ ├─ 在其他專案測試載入                            ║');
-    lines.push(`║ └─ 🎉 Core engines complete (${completedEngines.length}/4)`.padEnd(53) + '║');
+    nextSteps = ['補充 skill 邏輯', '建立 P1 plugins', '在其他專案測試'];
   }
+  sections.push({
+    title: '下一步建議',
+    lines: formatTree(nextSteps.map((s, i) => ({ label: s, value: '', isLast: i === nextSteps.length - 1 })))
+  });
 
-  lines.push('╚══════════════════════════════════════════════════╝');
-  lines.push('');
-  lines.push('📄 進度已更新: docs/PROGRESS.md');
-  lines.push('');
-
-  return lines.join('\n');
+  return '\n' + createBoxedReport('Vibe Engine Session Summary', sections) + '\n📄 進度已更新: docs/PROGRESS.md\n';
 }
 
 /**
