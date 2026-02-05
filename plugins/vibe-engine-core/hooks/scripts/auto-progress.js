@@ -21,9 +21,34 @@ const PROGRESS_FILE = path.join(PROJECT_ROOT, 'docs/PROGRESS.md');
 const VERIFY_SCRIPT = path.join(PROJECT_ROOT, 'scripts/verify-plugin.sh');
 
 /**
+ * 檢測是否在 plugin 開發專案中
+ */
+function isPluginDevProject() {
+  // 檢查是否存在 vibe-engine 專案標記
+  const markers = [
+    path.join(PROJECT_ROOT, 'plugins/vibe-engine-core'),
+    path.join(PROJECT_ROOT, '.claude-plugin/marketplace.json'),
+    path.join(PROJECT_ROOT, 'docs/SPEC.md')
+  ];
+
+  return markers.some(marker => fs.existsSync(marker));
+}
+
+/**
  * 執行驗證腳本
  */
 function runVerification() {
+  // 如果不在 plugin 開發專案中，跳過驗證
+  if (!isPluginDevProject()) {
+    return {
+      success: true,
+      passed: 0,
+      failed: 0,
+      skipped: true,
+      reason: 'Not in plugin development project'
+    };
+  }
+
   try {
     const result = execSync(`bash "${VERIFY_SCRIPT}" 2>&1`, {
       cwd: PROJECT_ROOT,
@@ -261,18 +286,25 @@ function generateProgressReport(verification, components) {
     '╔══════════════════════════════════════════════════╗',
     '║          Vibe Engine Session Summary             ║',
     '╠══════════════════════════════════════════════════╣',
-    `║ 驗證結果: ${verification.success ? '✅ PASS' : '❌ FAIL'} (${verification.passed}/${verification.passed + verification.failed})`,
-    '╠══════════════════════════════════════════════════╣',
-    '║ 完成度                                           ║',
-    `║ ├─ 結構: ${structurePercent}% (${totalDone}/${totalComponents} 檔案有內容)`,
-    `║ └─ 功能: ${functionalPercent}% (${functionalComponents}/${functionalTotal} hooks 可執行)`,
-    '╠══════════════════════════════════════════════════╣',
-    '║ 組件狀態                                         ║',
-    `║ ├─ Agents:   ${stats.agents.done}/${stats.agents.total} 文檔${stats.agents.scaffold > 0 ? ` (${stats.agents.scaffold} 待補)` : ''}`,
-    `║ ├─ Skills:   ${stats.skills.done}/${stats.skills.total} 指南${stats.skills.scaffold > 0 ? ` (${stats.skills.scaffold} 待補)` : ''}`,
-    `║ ├─ Commands: ${stats.commands.done}/${stats.commands.total} 文檔${stats.commands.scaffold > 0 ? ` (${stats.commands.scaffold} 待補)` : ''}`,
-    `║ └─ Hooks:    ${stats.hooks.done}/${stats.hooks.total} 可執行${stats.hooks.scaffold > 0 ? ` (${stats.hooks.scaffold} 待補)` : ''}`,
   ];
+
+  // 根據驗證狀態顯示不同訊息
+  if (verification.skipped) {
+    lines.push('║ 驗證結果: ⏭️  SKIPPED (非 plugin 開發專案)        ║');
+  } else {
+    lines.push(`║ 驗證結果: ${verification.success ? '✅ PASS' : '❌ FAIL'} (${verification.passed}/${verification.passed + verification.failed})`);
+  }
+
+  lines.push('╠══════════════════════════════════════════════════╣');
+  lines.push('║ 完成度                                           ║');
+  lines.push(`║ ├─ 結構: ${structurePercent}% (${totalDone}/${totalComponents} 檔案有內容)`);
+  lines.push(`║ └─ 功能: ${functionalPercent}% (${functionalComponents}/${functionalTotal} hooks 可執行)`);
+  lines.push('╠══════════════════════════════════════════════════╣');
+  lines.push('║ 組件狀態                                         ║');
+  lines.push(`║ ├─ Agents:   ${stats.agents.done}/${stats.agents.total} 文檔${stats.agents.scaffold > 0 ? ` (${stats.agents.scaffold} 待補)` : ''}`);
+  lines.push(`║ ├─ Skills:   ${stats.skills.done}/${stats.skills.total} 指南${stats.skills.scaffold > 0 ? ` (${stats.skills.scaffold} 待補)` : ''}`);
+  lines.push(`║ ├─ Commands: ${stats.commands.done}/${stats.commands.total} 文檔${stats.commands.scaffold > 0 ? ` (${stats.commands.scaffold} 待補)` : ''}`);
+  lines.push(`║ └─ Hooks:    ${stats.hooks.done}/${stats.hooks.total} 可執行${stats.hooks.scaffold > 0 ? ` (${stats.hooks.scaffold} 待補)` : ''}`);
 
   if (needsWork.length > 0 && needsWork.length <= 5) {
     lines.push('╠══════════════════════════════════════════════════╣');
