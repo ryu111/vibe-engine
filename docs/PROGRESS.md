@@ -1,7 +1,7 @@
 # Vibe Engine 實作進度
 
 > 最後更新: 2026-02-05
-> 當前版本: v0.6.3
+> 當前版本: v0.6.4
 > 內部驗證: ✅ 通過 (54/54)
 > 載入測試: ✅ 通過 (52/52) - vibe-test 專案
 >   - vibe-engine-core + guarantee: 32/32
@@ -75,6 +75,7 @@
 
 | 版本 | 日期 | 變更摘要 |
 |------|------|----------|
+| 0.6.4 | 2026-02-05 | 新增 vibe-engine-dashboard plugin：/dashboard、/metrics 命令 + TUI 渲染器 |
 | 0.6.3 | 2026-02-05 | Session Handoff: task-state.js + /handoff 命令 + 自動任務狀態持久化 |
 | 0.6.2 | 2026-02-05 | 新增 /vibe-setup 命令 + session-init 自動偵測開發工具配置 |
 | 0.6.1 | 2026-02-05 | 壓力測試 Phase 1 + 修復 auto-progress.js 非 plugin 專案偵測 |

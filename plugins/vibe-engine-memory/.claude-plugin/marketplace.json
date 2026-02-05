@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "vibe-engine-memory",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "Vibe Engine 記憶模組 - 提供三層記憶架構、Confidence Scoring、Instinct Learning 等記憶管理能力",
   "owner": {
     "name": "Vibe Engine Team"

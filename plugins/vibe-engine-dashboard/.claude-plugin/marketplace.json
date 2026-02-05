@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "vibe-engine-dashboard",
+  "version": "0.6.4",
+  "description": "Vibe Engine Dashboard plugin - Ch7 可觀測性實作。提供 TUI 面板顯示 Agent 狀態、資源使用、活動日誌。",
+  "owner": {
+    "name": "Vibe Engine Team"
+  },
+  "plugins": [
+    {
+      "name": "vibe-engine-dashboard",
+      "description": "1 agent、2 commands、1 skill、1 hook - TUI Dashboard + 指標收集",
+      "source": "./",
+      "category": "development"
+    }
+  ]
+}

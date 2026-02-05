@@ -1,0 +1,17 @@
+{
+  "name": "vibe-engine-dashboard",
+  "version": "0.6.4",
+  "description": "Vibe Engine Dashboard - TUI 可觀測性面板、即時指標監控",
+  "author": {
+    "name": "Vibe Engine Team"
+  },
+  "repository": "https://github.com/ryu111/vibe-engine",
+  "license": "MIT",
+  "keywords": [
+    "vibe-engineering",
+    "dashboard",
+    "observability",
+    "metrics",
+    "tui"
+  ]
+}
