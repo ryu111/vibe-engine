@@ -35,9 +35,14 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/circuit-breaker.js\" --reset-on-success",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/health-check.js\"",
+            "timeout": 30
           }
         ],
-        "description": "Reset circuit breaker on successful completion"
+        "description": "Reset circuit breaker and run health check on successful completion"
       }
     ]
   }

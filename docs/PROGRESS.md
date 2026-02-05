@@ -1,7 +1,7 @@
 # Vibe Engine 實作進度
 
 > 最後更新: 2026-02-05
-> 當前版本: v0.6.4
+> 當前版本: v0.6.5
 > 內部驗證: ✅ 通過 (54/54)
 > 載入測試: ✅ 通過 (52/52) - vibe-test 專案
 >   - vibe-engine-core + guarantee: 32/32
@@ -75,6 +75,7 @@
 
 | 版本 | 日期 | 變更摘要 |
 |------|------|----------|
+| 0.6.5 | 2026-02-05 | Plugin 完整性修復：hooks.json 加入 health-check、debugger 加入 auto-fix-loop、README 對齊實作 |
 | 0.6.4 | 2026-02-05 | 新增 vibe-engine-dashboard plugin：/dashboard、/metrics 命令 + TUI 渲染器 |
 | 0.6.3 | 2026-02-05 | Session Handoff: task-state.js + /handoff 命令 + 自動任務狀態持久化 |
 | 0.6.2 | 2026-02-05 | 新增 /vibe-setup 命令 + session-init 自動偵測開發工具配置 |
@@ -101,7 +102,7 @@
 | Ch4 錯誤恢復 | error-recovery, auto-fix-loop, circuit-breaker, saga-compensation | ✅ |
 | Ch5 記憶系統 | vibe-engine-memory (跨專案驗證通過) | ✅ |
 | Ch6 資源管理 | budget-tracker-engine, PreToolUse hook | ✅ |
-| Ch7 可觀測性 | /status, result-logger, PostToolUse hook | ✅ |
+| Ch7 可觀測性 | vibe-engine-dashboard (/dashboard, /metrics), TUI renderer, metrics-collector | ✅ |
 | Ch8 自主等級 | CLAUDE.md 規則 | 🔲 |
 | Ch9 安全權限 | permission-guard.js, reviewer, security agent | ✅ |
 | Ch10 方法論 | spec-generator, /spec, /verify, health-check | ✅ |
@@ -139,7 +140,8 @@
 4. [x] **P1**: 壓力測試 Phase 1 ✅ (14/35 組件，40%)
 5. [ ] **P1**: 壓力測試 Phase 2（錯誤注入，Guarantee 模組）
 6. [x] **P1**: 壓力測試 Phase 3 ✅ (8/8 Commands)
-7. [ ] **P2**: 建立 vibe-engine-dashboard plugin（Ch7 TUI Dashboard）
+7. [x] **P1**: vibe-engine-dashboard plugin ✅ (/dashboard, /metrics, TUI renderer)
+8. [x] **P1**: Plugin 完整性修復 ✅ (hooks.json, debugger.md, README)
 
 ---
 
@@ -164,10 +166,7 @@
 - [x] CLAUDE.md
 
 ### Agents
-- [x] planner.md - ✅ 完成
 - [x] debugger.md - ✅ 完成
-- [x] documenter.md - ✅ 完成
-- [x] security.md - ✅ 完成
 
 ### Skills
 - [x] error-recovery - ✅ 完成 (Forced Eval)
@@ -177,9 +176,8 @@
 ### Hooks
 - [x] hooks.json
 - [x] circuit-breaker.js - ✅ 完成 (Forced Eval)
-- [x] saga-compensation.js - ✅ 完成
 - [x] error-handler.js - ✅ 完成 (Forced Eval)
-- [x] retry-manager.js - ✅ 完成
+- [x] health-check.js - ✅ 完成
 
 ---
 
@@ -335,4 +333,5 @@
 
 ## 待規劃 (P2+)
 
-- vibe-engine-dashboard（Ch7 TUI Dashboard）
+- Phase 2 壓力測試（錯誤注入，Guarantee 模組驗證）
+- 代碼重構優化（降低 Health Score 中的高複雜度檔案）

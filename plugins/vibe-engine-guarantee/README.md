@@ -20,10 +20,7 @@ claude /install /Users/sbu/projects/vibe-engine/plugins/vibe-engine-guarantee
 
 | Agent | 用途 |
 |-------|------|
-| planner | 任務規劃與排程 |
 | debugger | 錯誤診斷與修復建議 |
-| documenter | 文檔生成與維護 |
-| security | 安全審計與漏洞檢測 |
 
 ### Skills
 
@@ -37,10 +34,9 @@ claude /install /Users/sbu/projects/vibe-engine/plugins/vibe-engine-guarantee
 
 | Hook | 事件 | 功能 |
 |------|------|------|
-| circuit-breaker | PreToolUse | 連續失敗熔斷保護 |
+| circuit-breaker | PreToolUse, Stop | 連續失敗熔斷保護 |
 | error-handler | SubagentStop | 錯誤偵測與自動修復觸發 |
-| saga-compensation | PostToolUse | 失敗回滾補償 |
-| retry-manager | PreToolUse | 智慧重試策略 |
+| health-check | Stop | 代碼健康度檢查 |
 
 ## 與 vibe-engine-core 的協作
 
@@ -64,5 +60,5 @@ claude /install /Users/sbu/projects/vibe-engine/plugins/vibe-engine-guarantee
 
 ## 版本
 
-- 當前版本：0.5.0
-- 最低 vibe-engine-core 版本：0.5.0
+- 當前版本：0.6.5
+- 最低 vibe-engine-core 版本：0.6.0

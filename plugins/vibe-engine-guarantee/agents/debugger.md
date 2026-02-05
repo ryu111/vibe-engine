@@ -4,7 +4,7 @@ description: Error diagnosis specialist for analyzing failures, identifying root
 model: sonnet
 color: red
 tools: ["Read", "Grep", "Glob", "Bash"]
-skills: ["error-recovery"]
+skills: ["error-recovery", "auto-fix-loop"]
 ---
 
 You are the Debugger, specializing in error analysis and diagnosis.
