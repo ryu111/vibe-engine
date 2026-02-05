@@ -1,9 +1,12 @@
 # Vibe Engine 實作進度
 
 > 最後更新: 2026-02-05
-> 當前版本: v0.6.0
+> 當前版本: v0.6.1
 > 內部驗證: ✅ 通過 (54/54)
-> 載入測試: ✅ 通過 (32/32) - vibe-test 專案
+> 載入測試: ✅ 通過 (52/52) - vibe-test 專案
+>   - vibe-engine-core + guarantee: 32/32
+>   - vibe-engine-memory: 20/20
+> 壓力測試: 🔳 Phase 1 完成 (14/35 組件觸發，40%)
 
 ## 狀態說明
 - ⬜ 未開始
@@ -60,6 +63,8 @@
 
 | 日期 | 類型 | 通過 | 失敗 | 狀態 |
 |------|------|------|------|------|
+| 2026-02-05 | 壓力測試 Phase 1 (vibe-test) | 14/35 | - | 🔳 40% |
+| 2026-02-05 | vibe-engine-memory 跨專案測試 (vibe-test) | 20/20 | 0 | ✅ |
 | 2026-02-04 | 跨專案載入測試 (vibe-test) | 32/32 | 0 | ✅ |
 | 2026-02-04 | 內部結構驗證 | 54/54 | 0 | ✅ |
 
@@ -69,6 +74,7 @@
 
 | 版本 | 日期 | 變更摘要 |
 |------|------|----------|
+| 0.6.1 | 2026-02-05 | 壓力測試 Phase 1 + 修復 auto-progress.js 非 plugin 專案偵測 |
 | 0.6.0 | 2026-02-05 | vibe-engine-memory 功能實作：7 lib 模組 + 3 完整 hooks + Confidence Scoring + Instinct Learning |
 | 0.5.3 | 2026-02-05 | 新增 vibe-engine-memory plugin 骨架：2 agents, 3 skills, 5 commands, 3 hooks |
 | 0.5.2 | 2026-02-04 | 修正 Permission Guard hookSpecificOutput 格式，新增 health-check.js |
@@ -89,7 +95,7 @@
 | Ch2 閉環驗證 | reviewer, tester, verification-engine | ✅ |
 | Ch3 狀態管理 | state-saver, (P1: checkpoint-manager) | 🔳 |
 | Ch4 錯誤恢復 | error-recovery, auto-fix-loop, circuit-breaker, saga-compensation | ✅ |
-| Ch5 記憶系統 | vibe-engine-memory (功能實作完成) | 🔳 |
+| Ch5 記憶系統 | vibe-engine-memory (跨專案驗證通過) | ✅ |
 | Ch6 資源管理 | budget-tracker-engine, PreToolUse hook | ✅ |
 | Ch7 可觀測性 | /status, result-logger, PostToolUse hook | ✅ |
 | Ch8 自主等級 | CLAUDE.md 規則 | 🔲 |
@@ -119,11 +125,17 @@
 - [x] Hook 腳本執行驗證（5/5 通過）
 - [x] 跨專案載入測試（vibe-test，32/32 通過）
 - [x] 建立載入測試指南 (docs/load-test-guide.md)
+- [x] 壓力測試框架建立（vibe-test/scripts/, docs/）
+- [x] 修復 auto-progress.js 非 plugin 專案偵測 bug
 
 ### 待完成（按優先級）
 1. [x] **P1**: 建立 vibe-engine-memory plugin 骨架 ✅ (18 files)
-2. [ ] **P1**: 補充 vibe-engine-memory 功能實作
-3. [ ] **P2**: 建立 vibe-engine-dashboard plugin（Ch7 TUI Dashboard）
+2. [x] **P1**: vibe-engine-memory 功能實作 ✅ (7 lib + 完整 hooks)
+3. [x] **P1**: vibe-engine-memory 跨專案驗證 ✅ (20/20 通過)
+4. [x] **P1**: 壓力測試 Phase 1 ✅ (14/35 組件，40%)
+5. [ ] **P1**: 壓力測試 Phase 2（錯誤注入，Guarantee 模組）
+6. [ ] **P1**: 壓力測試 Phase 3（記憶密集操作）
+7. [ ] **P2**: 建立 vibe-engine-dashboard plugin（Ch7 TUI Dashboard）
 
 ---
 
@@ -195,7 +207,36 @@
 
 ---
 
-## vibe-engine-memory (P1) 🔳 功能實作完成
+## 壓力測試結果
+
+**測試專案**: vibe-test
+**測試日期**: 2026-02-05
+**測試報告**: [vibe-test/results/2026-02-05-stress-test-report.md](../../vibe-test/results/2026-02-05-stress-test-report.md)
+
+### Phase 1: 複雜需求測試
+
+| 模組 | 總組件 | 已觸發 | 觸發率 |
+|------|--------|--------|--------|
+| vibe-engine-core | 19 | 10 | 53% |
+| vibe-engine-guarantee | 6 | 1 | 17% |
+| vibe-engine-memory | 10 | 3 | 30% |
+| **總計** | **35** | **14** | **40%** |
+
+#### 已觸發組件
+- **Agents**: architect ✅, developer ✅, tester ✅
+- **Hooks**: session-init ✅, budget-tracker-engine ✅, observation-collector ✅, result-logger ✅, verification-engine ✅, memory-init ✅, memory-consolidation ✅, circuit-breaker ✅
+- **Commands**: /verify ✅
+
+#### 待測試（Phase 2-3）
+- **Phase 2**: 錯誤注入測試（Guarantee 模組）
+- **Phase 3**: 記憶密集操作（Memory Commands）
+
+### Bug 修復
+- `auto-progress.js`: 新增 `isPluginDevProject()` 偵測，在非 plugin 開發專案中顯示 "⏭️ SKIPPED" 而非錯誤的 "❌ FAIL"
+
+---
+
+## vibe-engine-memory (P1) ✅ 完成並驗證
 
 ### 基礎結構
 - [x] plugin.json
@@ -213,20 +254,20 @@
 - [x] lib/checkpoint-manager.js - ✅ CheckpointManager（創建、驗證、清理）
 
 ### Agents
-- [x] memory-curator.md - 🔲 骨架（待連接 lib）
-- [x] pattern-detector.md - 🔲 骨架（待連接 lib）
+- [x] memory-curator.md - ✅ 完成（連接 MemoryStore + 去重）
+- [x] pattern-detector.md - ✅ 完成（連接 InstinctManager + 模式檢測）
 
 ### Skills
-- [x] memory-manager - 🔲 骨架（lib 已實作）
-- [x] checkpoint-manager - 🔲 骨架（lib 已實作）
-- [x] instinct-learning - 🔲 骨架（lib 已實作）
+- [x] memory-manager - ✅ 完成（連接 lib/memory-store）
+- [x] checkpoint-manager - ✅ 完成（連接 lib/checkpoint-manager）
+- [x] instinct-learning - ✅ 完成（連接 lib/instinct-manager）
 
 ### Commands
-- [x] /remember - 🔲 骨架（待連接 memory-store）
-- [x] /recall - 🔲 骨架（待連接 memory-store）
-- [x] /checkpoint - 🔲 骨架（待連接 checkpoint-manager）
-- [x] /evolve - 🔲 骨架（待連接 instinct-manager）
-- [x] /instinct-status - 🔲 骨架（待連接 instinct-manager）
+- [x] /remember - ✅ 完成（儲存三類記憶）
+- [x] /recall - ✅ 完成（相關性檢索）
+- [x] /checkpoint - ✅ 完成（create/list/verify）
+- [x] /evolve - ✅ 完成（聚類分析 + 演化建議）
+- [x] /instinct-status - ✅ 完成（分組顯示 + 信心圖示）
 
 ### Hooks
 - [x] hooks.json
@@ -241,6 +282,32 @@
 | Lib 模組 | 7/7 | ✅ |
 | Hook 語法 | 10/10 | ✅ |
 | Frontmatter | 10/10 | ✅ |
+
+### 跨專案測試結果 (2026-02-05)
+
+**測試專案**: vibe-test
+**測試報告**: [results/2026-02-05-memory-plugin-test.md](../results/2026-02-05-memory-plugin-test.md)
+
+| 類別 | 通過 | 說明 |
+|------|------|------|
+| Commands | 7/7 | /remember, /recall, /checkpoint (create/list/verify), /instinct-status, /evolve |
+| Hooks | 3/3 | memory-init 載入 3 筆記憶, observation-collector 收集 35 筆, memory-consolidation 整合 4 新 + 3 更新 |
+| Agents | 2/2 | memory-curator (6,994 tokens), pattern-detector (23,552 tokens) |
+| 檔案結構 | 8/8 | .vibe-engine/memory/, observations.jsonl, checkpoints/, instincts/ |
+| **總計** | **20/20** | **100% 通過** |
+
+#### Agent 效能統計
+| Agent | Tool Calls | Tokens | 時間 |
+|-------|------------|--------|------|
+| memory-curator | 7 | 6,994 | 10.6s |
+| pattern-detector | 1 | 23,552 | 9.2s |
+
+#### Pattern Detector 識別的模式
+1. Glob 工具頻繁使用 (25 次, confidence: 0.8)
+2. Read 工具重複讀取 (12 次, confidence: 0.75)
+3. Bash 指令測試驗證 (28 次, confidence: 0.7)
+4. Task 工具批量使用 (12 次, confidence: 0.65)
+5. Write 工具結果輸出 (4 次, confidence: 0.6)
 
 ### 功能亮點
 - **Confidence Scoring**: 四等級信心系統（tentative → near_certain）
