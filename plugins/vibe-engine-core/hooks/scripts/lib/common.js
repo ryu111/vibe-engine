@@ -19,7 +19,7 @@ const path = require('path');
  * 優先級：
  * 1. CLAUDE_PROJECT_ROOT 環境變數
  * 2. 在 .claude/plugins/cache 內時使用全局目錄
- * 3. 向上遞迴查找 .git/.vibe-engine/package.json
+ * 3. 向上遞迴查找 .git/package.json
  */
 function getProjectRoot() {
   if (process.env.CLAUDE_PROJECT_ROOT) {
@@ -36,7 +36,6 @@ function getProjectRoot() {
   while (current !== '/') {
     const markers = [
       path.join(current, '.git'),
-      path.join(current, '.vibe-engine'),
       path.join(current, 'package.json')
     ];
 
