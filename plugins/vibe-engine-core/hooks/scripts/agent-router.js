@@ -86,8 +86,9 @@ const ROUTING_RULES = {
   directResponse: {
     patterns: [
       /^(what|how|why|where|which|explain|describe|tell me)/i,
-      /^(什麼|如何|為什麼|哪|解釋|說明)/,
-      /\?$/,
+      /^(什麼|如何|為什麼|哪|解釋|說明|怎樣)/,
+      /(可以|是否|有沒有|能不能).{0,20}[?？]/,  // 中文疑問句式（需配合問號）
+      /[?？]$/,  // 英文 + 中文全形問號
       /^\/status/,
       /^\/help/,
       /^\/budget/

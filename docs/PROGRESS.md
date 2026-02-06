@@ -1,7 +1,7 @@
 # Vibe Engine 實作進度
 
 > 最後更新: 2026-02-06
-> 整體狀態: **智能路由 + 上下文感知驗證 + Auto-Fix 已實作**
+> 整體狀態: **核心自動化鏈完成 — 分類→分解→路由→驗證→修復 全自動**
 
 ---
 
@@ -11,13 +11,13 @@
 核心價值實現度
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. 任務自動分解    ██████████░░  ✅ Hook 自動觸發已實作
-2. 多 Agent 協作   ██████████░░  ✅ 智能路由已實作！
-3. 閉環驗證        ██████████░░  ✅ 上下文感知 + Auto-Fix Loop
+1. 任務自動分解    ███████████░  ✅ 計分制模式 + 複合需求 + 路徑消除
+2. 多 Agent 協作   ███████████░  ✅ 中文路由 + 狀態聚合 + 強制指令
+3. 閉環驗證        ███████████░  ✅ 上下文感知 + Auto-Fix + 狀態聚合
 4. 記憶學習        ████░░░░░░░░  有框架，缺背景分析
 5. 狀態恢復        ████░░░░░░░░  有框架，缺實際運作
 
-整體：~70% | 核心自動化鏈（分類→分解→路由→驗證→修復）已實作
+整體：~75% | 核心鏈 1-3 達 ~90%，缺 error-recovery + Instinct Learning
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
@@ -61,13 +61,16 @@
 ## ✅ 下一步（按優先順序）
 
 ### P0 - 實現「全自動」的基礎
-- [x] **智能路由**: ✅ `agent-router.js` 生成強制指令 + `routing-completion-validator.js` 閉環驗證
+- [x] **智能路由**: ✅ `agent-router.js` 強制指令 + 中文疑問模式 + `routing-completion-validator.js` 閉環
 - [x] **自動驗證**: ✅ `verification-engine.js` 上下文感知 + Auto-Fix Loop
+- [x] **分類優化**: ✅ `prompt-classifier.js` 路徑消除 + Segmenter + 複合需求
+- [x] **分解優化**: ✅ `task-decomposition-engine.js` 計分制模式 + 路徑消除 + 複合需求整合
+- [x] **狀態聚合**: ✅ `completion-check.js` 重寫為任務狀態聚合器
 
 ### P1 - 實現「閉環」品質保證
 - [x] **重試機制**: ✅ `routing-completion-validator.js` 已實作最多 3 次重試
 - [x] **自動修復迴路**: ✅ 整合至 `verification-engine.js`（最多 3 次迭代）
-- [ ] **錯誤分類**: 實作 `error-recovery` 的錯誯類型判斷
+- [ ] **錯誤分類**: 實作 `error-recovery` 的錯誤類型判斷
 
 ### P2 - 實現「持續學習」
 - [ ] **觀察分析**: 讓 `pattern-detector` 定期分析 observations.jsonl
@@ -103,10 +106,12 @@
 | | /budget | ✅ | ✅ | ✅ | 完成 |
 | **Hooks** |
 | | session-init.js | ✅ | ✅ | ✅ | 完成 |
-| | prompt-classifier.js | ✅ | ✅ | ✅ | ✅ **中文 NLP 優化：路徑消除 + Segmenter + 複合需求** |
-| | agent-router.js | ✅ | ✅ | ✅ | ✅ **已實作強制指令** |
-| | routing-completion-validator.js | ✅ | ✅ | ✅ | ✅ **新增：閉環驗證** |
-| | routing-state-manager.js | ✅ | ✅ | ✅ | ✅ **新增：狀態追蹤** |
+| | prompt-classifier.js | ✅ | ✅ | ✅ | ✅ **中文 NLP：路徑消除 + Segmenter + 複合需求** |
+| | task-decomposition-engine.js | ✅ | ✅ | ✅ | ✅ **計分制模式 + 複合需求整合 + 路徑消除** |
+| | agent-router.js | ✅ | ✅ | ✅ | ✅ **強制指令 + 中文疑問模式** |
+| | routing-completion-validator.js | ✅ | ✅ | ✅ | ✅ 閉環驗證 + 重試機制 |
+| | routing-state-manager.js | ✅ | ✅ | ✅ | ✅ 狀態追蹤 + 摘要 |
+| | completion-check.js | ✅ | ✅ | ✅ | ✅ **重寫：任務狀態聚合器** |
 | | verification-engine.js | ✅ | ✅ | ✅ | ✅ 上下文感知 + Auto-Fix |
 | | budget-tracker-engine.js | ✅ | ✅ | ✅ | 完成 |
 
@@ -173,6 +178,7 @@
 
 | 日期 | 結構驗證 | 整合測試 | 狀態 |
 |------|----------|----------|------|
+| 2026-02-06 | 55/55 ✅ | 100/100 ✅ | E2E 全通過（含場景 J 缺口修復驗證）|
 | 2026-02-06 | 55/55 ✅ | 80/80 ✅ | 結構 + E2E 全通過（含場景 I 分類器回歸）|
 | 2026-02-06 | 55/55 ✅ | 52/52 ✅ | 結構 + E2E 全通過 |
 | 2026-02-06 | 55/55 ✅ | 未執行 | 結構完成 |

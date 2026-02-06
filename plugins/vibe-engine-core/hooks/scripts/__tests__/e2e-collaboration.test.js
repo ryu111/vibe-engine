@@ -12,6 +12,7 @@
  * G. 上下文感知驗證 + Auto-Fix 工作流
  * H. Hook Chain 管道整合測試（真實進程 stdin/stdout）
  * I. 分類器準確性回歸測試（路徑消除、Segmenter 詞數、複合需求、分類結果）
+ * J. 缺口修復驗證（計分制模式識別、中文直接回答、完成聚合器、複合需求整合）
  */
 
 const path = require('path');
@@ -40,6 +41,9 @@ const {
   classifyRequest, classifyComplexity, analyzePromptMetrics,
   sanitizePrompt, countWords, detectCompoundRequirements
 } = require(path.join(SCRIPTS_DIR, 'prompt-classifier'));
+const {
+  aggregateTaskState, shouldDefer, generateCompletionSummary
+} = require(path.join(SCRIPTS_DIR, 'completion-check'));
 
 // 測試上下文
 const testContext = {
@@ -885,6 +889,25 @@ async function testHookChainPipeline() {
       `isDirective: ${step3?.hookSpecificOutput?.isDirective}, planId: ${step3?.hookSpecificOutput?.planId}`
     );
 
+    // ── H1.5: completion-check（活躍路由 → deferred）──
+    console.log('\n📋 Step 3a: completion-check（活躍路由 → deferred）');
+    const step3a = runHookScript('completion-check.js', {
+      transcript_summary: '執行了部分任務',
+      reason: 'stop'
+    }, hookEnv);
+
+    assert(
+      step3a && step3a.continue === true,
+      'H3a.1 completion-check 進程執行成功',
+      `output: ${JSON.stringify(step3a)?.substring(0, 100)}`
+    );
+
+    assert(
+      step3a.hookSpecificOutput?.completionCheck === 'deferred',
+      'H3a.2 有活躍路由時 completion-check 延遲到 routing-completion-validator',
+      `completionCheck: ${step3a?.hookSpecificOutput?.completionCheck}`
+    );
+
     // ── H2: Stop 鏈 — 活躍路由時跳過驗證 ──
     console.log('\n📋 Step 4: verification-engine（活躍路由 → fast-path 跳過）');
     const step4 = runHookScript('verification-engine.js', {
@@ -1093,6 +1116,195 @@ async function testClassifierAccuracy() {
 }
 
 // ============================================================
+// 場景 J: 缺口修復驗證
+// ============================================================
+async function testGapFixes() {
+  console.log('\n═══════════════════════════════════════');
+  console.log('場景 J: 缺口修復驗證');
+  console.log('═══════════════════════════════════════\n');
+
+  const tempDir = path.join(__dirname, '.test-temp-j-' + Date.now());
+  const vibeDir = path.join(tempDir, '.vibe-engine');
+  fs.mkdirSync(path.join(vibeDir, 'tasks'), { recursive: true });
+
+  const originalRoot = process.env.CLAUDE_PROJECT_ROOT;
+  const hookEnv = {
+    CLAUDE_PROJECT_ROOT: tempDir,
+    CLAUDE_PLUGIN_ROOT: path.join(__dirname, '../..')
+  };
+  process.env.CLAUDE_PROJECT_ROOT = tempDir;
+
+  try {
+    // ── J1: identifyTaskPattern 計分制 ──
+    console.log('📋 Step 1: 計分制模式識別');
+
+    const p1 = identifyTaskPattern('新增測試用例');
+    assert(
+      p1.name === 'testing',
+      'J1.1 "新增測試用例" 應匹配 testing（非 newFeature）',
+      `actual: ${p1.name}`
+    );
+
+    const p2 = identifyTaskPattern('修復並測試 auth 模組');
+    assert(
+      p2.name === 'bugFix',
+      'J1.2 "修復並測試" 應匹配 bugFix（修復 > 測試）',
+      `actual: ${p2.name}`
+    );
+
+    const p3 = identifyTaskPattern('在 test-results/output.json 中新增欄位');
+    assert(
+      p3.name === 'newFeature',
+      'J1.3 路徑中的 test 不應觸發 testing 模式',
+      `actual: ${p3.name}`
+    );
+
+    // ── J2: shouldDirectResponse 中文模式 ──
+    console.log('\n📋 Step 2: 中文直接回答模式');
+
+    assert(
+      shouldDirectResponse('這個函數可以處理中文嗎？', { complexity: 'moderate' }),
+      'J2.1 "可以...？" 中文問句應直接回答',
+      'shouldDirectResponse returned false'
+    );
+
+    assert(
+      shouldDirectResponse('是否需要安裝額外的套件？', { complexity: 'moderate' }),
+      'J2.2 "是否...？" 中文問句應直接回答',
+      'shouldDirectResponse returned false'
+    );
+
+    assert(
+      shouldDirectResponse('有沒有更好的方法？', { complexity: 'moderate' }),
+      'J2.3 "有沒有...？" 中文問句應直接回答',
+      'shouldDirectResponse returned false'
+    );
+
+    assert(
+      shouldDirectResponse('能不能解釋一下？', { complexity: 'moderate' }),
+      'J2.4 "能不能...？" 中文問句應直接回答',
+      'shouldDirectResponse returned false'
+    );
+
+    assert(
+      shouldDirectResponse('怎樣設定環境變數', { complexity: 'moderate' }),
+      'J2.5 "怎樣..." 開頭應直接回答',
+      'shouldDirectResponse returned false'
+    );
+
+    assert(
+      shouldDirectResponse('REST API 是什麼？', { complexity: 'moderate' }),
+      'J2.6 中文全形問號應被匹配',
+      'shouldDirectResponse returned false'
+    );
+
+    assert(
+      !shouldDirectResponse('可以幫我實作登入功能', { complexity: 'moderate' }),
+      'J2.7 "可以幫我實作..." 無問號不應觸發直接回答',
+      'shouldDirectResponse returned true unexpectedly'
+    );
+
+    // ── J3: completion-check 聚合器 ──
+    console.log('\n📋 Step 3: 完成狀態聚合器');
+
+    // 3a: 無任何狀態時
+    const summary1 = aggregateTaskState();
+    assert(
+      summary1.routing !== undefined && summary1.autoFix !== undefined,
+      'J3.1 聚合器返回結構完整',
+      `keys: ${Object.keys(summary1).join(', ')}`
+    );
+
+    // 3b: 有活躍路由 → defer
+    const { RoutingStateManager } = require(path.join(SCRIPTS_DIR, 'lib/routing-state-manager'));
+    const manager = new RoutingStateManager(tempDir);
+    const mockPlan = {
+      strategy: 'sequential',
+      phases: [{ tasks: [{ id: 'task-1', agent: 'developer', description: 'test' }] }]
+    };
+    manager.createPlan(mockPlan, 'test');
+
+    const summary2 = aggregateTaskState();
+    const defer2 = shouldDefer(summary2);
+    assert(
+      defer2.defer === true && defer2.reason === 'active_routing',
+      'J3.2 活躍路由時 shouldDefer 返回 true',
+      `defer: ${defer2.defer}, reason: ${defer2.reason}`
+    );
+
+    manager.markPlanCompleted();
+
+    // 3c: 無活躍狀態 → 不 defer
+    const summary3 = aggregateTaskState();
+    const defer3 = shouldDefer(summary3);
+    assert(
+      defer3.defer === false,
+      'J3.3 無活躍狀態時不 defer',
+      `defer: ${defer3.defer}`
+    );
+
+    const msg = generateCompletionSummary(summary3);
+    assert(
+      typeof msg === 'string' && msg.includes('[Completion Summary]'),
+      'J3.4 生成有效的完成摘要',
+      `msg: ${msg?.substring(0, 50)}`
+    );
+
+    // ── J4: task-decomposition 整合複合需求 ──
+    console.log('\n📋 Step 4: 複合需求整合');
+
+    const decomp1 = decomposeTask('新增用戶註冊、登入、忘記密碼三個功能', {
+      complexity: 'complex',
+      metrics: { compoundRequirements: 3 }
+    });
+
+    assert(
+      decomp1.task_decomposition.subtasks.length >= 3,
+      'J4.1 複合需求 >= 3 時子任務數 >= 3',
+      `subtasks: ${decomp1.task_decomposition.subtasks.length}`
+    );
+
+    // ── J5: generateTaskDescription 包含上下文 ──
+    console.log('\n📋 Step 5: 任務描述上下文');
+
+    const decomp2 = decomposeTask('新增 JWT 認證功能', { complexity: 'moderate' });
+    const devTask = decomp2.task_decomposition.subtasks.find(t => t.agent === 'developer');
+
+    assert(
+      devTask && devTask.description.includes('JWT'),
+      'J5.1 任務描述包含原始請求的關鍵上下文',
+      `description: ${devTask?.description}`
+    );
+
+    // ── J6: completion-check 進程級驗證 ──
+    console.log('\n📋 Step 6: 進程級驗證');
+
+    const ccResult = runHookScript('completion-check.js', {
+      transcript_summary: '完成了一些工作',
+      reason: 'stop'
+    }, hookEnv);
+
+    assert(
+      ccResult && ccResult.continue === true,
+      'J6.1 completion-check 進程執行永遠 continue=true',
+      `continue: ${ccResult?.continue}`
+    );
+
+    assert(
+      ccResult.hookSpecificOutput?.completionCheck !== undefined,
+      'J6.2 hookSpecificOutput 包含 completionCheck 欄位',
+      `keys: ${Object.keys(ccResult?.hookSpecificOutput || {}).join(', ')}`
+    );
+
+  } finally {
+    process.env.CLAUDE_PROJECT_ROOT = originalRoot;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  console.log('\n✅ 場景 J 完成');
+}
+
+// ============================================================
 // 主測試執行
 // ============================================================
 async function runAllTests() {
@@ -1111,6 +1323,7 @@ async function runAllTests() {
     await testContextAwareAndAutoFix();  // 場景 G
     await testHookChainPipeline();        // 場景 H
     await testClassifierAccuracy();       // 場景 I
+    await testGapFixes();                  // 場景 J
   } catch (error) {
     console.error('\n❌ 測試執行錯誤:', error.message);
     console.error(error.stack);

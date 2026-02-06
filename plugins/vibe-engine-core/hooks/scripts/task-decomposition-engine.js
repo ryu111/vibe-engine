@@ -20,6 +20,7 @@ const path = require('path');
 const { getProjectRoot } = require('./lib/common');
 const { readHookInput, writeHookOutput } = require('./lib/hook-io');
 const { jsonToYaml } = require('./lib/yaml-parser');
+const { sanitizePrompt, detectCompoundRequirements } = require('./prompt-classifier');
 
 // 配置
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '../..');
@@ -102,21 +103,38 @@ const TASK_PATTERNS = {
 };
 
 /**
- * 識別任務模式
+ * 識別任務模式（計分制 — 避免 first-match 優先級問題）
  */
 function identifyTaskPattern(prompt) {
-  const lowerPrompt = prompt.toLowerCase();
+  const { sanitized } = sanitizePrompt(prompt);
+  const lowerSanitized = sanitized.toLowerCase();
 
-  for (const [patternName, pattern] of Object.entries(TASK_PATTERNS)) {
-    for (const keyword of pattern.keywords) {
-      if (prompt.includes(keyword) || lowerPrompt.includes(keyword)) {
-        return { name: patternName, ...pattern };
+  // 計分制：統計每個模式的關鍵字匹配數
+  const scores = {};
+  for (const [name, pattern] of Object.entries(TASK_PATTERNS)) {
+    scores[name] = 0;
+    for (const kw of pattern.keywords) {
+      if (sanitized.includes(kw) || lowerSanitized.includes(kw)) {
+        scores[name]++;
       }
     }
   }
 
-  // 預設為新功能開發
-  return { name: 'newFeature', ...TASK_PATTERNS.newFeature };
+  // 上下文加分：中文「動詞+目標」組合
+  if (/(?:新增|添加|撰寫|寫).*測試/.test(sanitized)) scores.testing = (scores.testing || 0) + 2;
+  if (/(?:新增|添加|建立|創建).*功能/.test(sanitized)) scores.newFeature = (scores.newFeature || 0) + 2;
+
+  // 取最高分模式
+  let best = 'newFeature';
+  let bestScore = 0;
+  for (const [name, score] of Object.entries(scores)) {
+    if (score > bestScore) {
+      bestScore = score;
+      best = name;
+    }
+  }
+
+  return { name: best, ...TASK_PATTERNS[best], matchScore: bestScore };
 }
 
 /**
@@ -146,19 +164,20 @@ function extractMentionedFiles(prompt) {
 }
 
 /**
- * 分析任務需要的 agents
+ * 分析任務需要的 agents（路徑消除版）
  */
 function analyzeRequiredAgents(prompt, taskPattern) {
   const requiredAgents = new Set();
-  const lowerPrompt = prompt.toLowerCase();
+  const { sanitized } = sanitizePrompt(prompt);
+  const lowerSanitized = sanitized.toLowerCase();
 
   // 根據任務模式添加默認 agents
   taskPattern.defaultFlow.forEach(agent => requiredAgents.add(agent));
 
-  // 根據關鍵詞額外添加 agents
+  // 根據關鍵詞額外添加 agents（用 sanitized 避免路徑誤報）
   for (const [agentName, agentInfo] of Object.entries(AGENTS)) {
     for (const capability of agentInfo.capabilities) {
-      if (prompt.includes(capability) || lowerPrompt.includes(capability)) {
+      if (sanitized.includes(capability) || lowerSanitized.includes(capability)) {
         requiredAgents.add(agentName);
         break;
       }
@@ -283,18 +302,20 @@ function decomposeByDependency(prompt, requiredAgents, mentionedFiles) {
 }
 
 /**
- * 生成任務描述
+ * 生成任務描述（含原始請求上下文摘要）
  */
 function generateTaskDescription(agent, prompt) {
+  const snippet = prompt.length > 50 ? prompt.substring(0, 50) + '...' : prompt;
+
   const templates = {
-    architect: `根據需求設計架構和 API 介面`,
-    developer: `實作功能代碼`,
-    tester: `撰寫並執行測試`,
-    reviewer: `審查代碼品質和安全性`,
-    explorer: `搜尋和分析相關代碼`
+    architect: `根據需求設計架構和 API 介面：${snippet}`,
+    developer: `實作功能代碼：${snippet}`,
+    tester: `撰寫並執行測試：${snippet}`,
+    reviewer: `審查代碼品質和安全性：${snippet}`,
+    explorer: `搜尋和分析相關代碼：${snippet}`
   };
 
-  return templates[agent] || `執行 ${agent} 任務`;
+  return templates[agent] || `執行 ${agent} 任務：${snippet}`;
 }
 
 /**
@@ -412,6 +433,23 @@ function decomposeTask(prompt, classificationResult = null) {
       break;
     default:
       subtasks = decomposeByResponsibility(prompt, requiredAgents, mentionedFiles);
+  }
+
+  // 複合需求保障：確保子任務數不低於複合需求數
+  const compoundCount = classificationResult?.metrics?.compoundRequirements || 0;
+  if (compoundCount >= 2 && subtasks.length < compoundCount) {
+    const deficit = compoundCount - subtasks.length;
+    for (let i = 0; i < deficit; i++) {
+      subtasks.push({
+        id: `task-${subtasks.length + 1}`,
+        agent: 'developer',
+        description: generateTaskDescription('developer', prompt),
+        inputs: [prompt],
+        outputs: ['實作完成的代碼'],
+        depends_on: subtasks.filter(t => t.agent === 'architect').map(t => t.id),
+        estimated_complexity: 'moderate'
+      });
+    }
   }
 
   // 生成並行組
