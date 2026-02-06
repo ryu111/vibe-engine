@@ -39,7 +39,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|Bash|NotebookEdit",
+        "matcher": "Edit|Write|Bash|NotebookEdit|EnterPlanMode",
         "hooks": [
           {
             "type": "command",
@@ -57,7 +57,7 @@
             "timeout": 5
           }
         ],
-        "description": "強制路由委派、檢查危險操作權限和預算"
+        "description": "強制路由委派（含 EnterPlanMode 攔截）、檢查危險操作權限和預算"
       },
       {
         "matcher": "Task",

@@ -8,7 +8,7 @@
  * 3. 實現「Router, Not Executor」原則
  *
  * 觸發點：
- * - PreToolUse hook（Write/Edit/Bash/NotebookEdit 工具）
+ * - PreToolUse hook（Write/Edit/Bash/NotebookEdit/EnterPlanMode 工具）
  *
  * 對應章節：Ch1 協調引擎 - Star Topology
  */
@@ -35,10 +35,11 @@ const ALLOWED_TOOLS = new Set([
 
 // 需要檢查的工具（可能違反路由）
 const EXECUTION_TOOLS = new Set([
-  'Write',        // 直接建檔
-  'Edit',         // 直接改檔
-  'Bash',         // 可能用來寫檔（echo/cat/sed）
-  'NotebookEdit'  // 直接改 notebook
+  'Write',         // 直接建檔
+  'Edit',          // 直接改檔
+  'Bash',          // 可能用來寫檔（echo/cat/sed）
+  'NotebookEdit',  // 直接改 notebook
+  'EnterPlanMode'  // 自行規劃（應由 architect agent 負責）
 ]);
 
 // ============================================================
@@ -187,7 +188,7 @@ function buildDenyMessage(info) {
     `})`,
     '```',
     '',
-    '⛔ **直接使用 Write/Edit/Bash 違反 Router, Not Executor 原則**',
+    '⛔ **直接使用 Write/Edit/Bash/EnterPlanMode 違反 Router, Not Executor 原則**',
     ''
   ];
 

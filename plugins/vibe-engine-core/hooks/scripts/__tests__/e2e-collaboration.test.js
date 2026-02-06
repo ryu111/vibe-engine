@@ -3721,6 +3721,81 @@ async function testDualLayerDefense() {
       console.log(`❌ W5 錯誤: ${err.message}`);
     }
 
+    // ── W6: EnterPlanMode 攔截驗證 ──
+    console.log('\n📋 W6: EnterPlanMode 攔截驗證');
+    try {
+      if (!routingEnforcer) {
+        console.log('⚠️  routing-enforcer 模組未載入，跳過 W6');
+      } else {
+        const { EXECUTION_TOOLS: execTools, evaluateRouting: evalRouting, buildDenyMessage: buildDeny } = routingEnforcer;
+
+        // W6.1 EnterPlanMode 在 EXECUTION_TOOLS 中
+        assert(
+          execTools.has('EnterPlanMode'),
+          'W6.1 EnterPlanMode 在 EXECUTION_TOOLS 集合中',
+          `has: ${execTools.has('EnterPlanMode')}`
+        );
+
+        // W6.2 有活躍路由時 EnterPlanMode 被 deny
+        // 先建立活躍路由狀態
+        const routingPathSetup = path.join(tempDir, '.vibe-engine', 'routing-state.json');
+        fs.writeFileSync(routingPathSetup, JSON.stringify({
+          planId: 'test-plan-w6',
+          status: 'in_progress',
+          phases: [{
+            phase: 1,
+            tasks: [{ id: 'task-1', agent: 'architect', status: 'pending', description: '設計遊戲架構' }]
+          }]
+        }));
+        const planModeResult = evalRouting({ tool_name: 'EnterPlanMode' });
+        assert(
+          planModeResult.decision === 'deny',
+          'W6.2 EnterPlanMode 在路由活躍時被 deny',
+          `decision: ${planModeResult.decision}`
+        );
+        assert(
+          planModeResult.delegateTo === 'architect',
+          'W6.3 deny 訊息指向 architect agent',
+          `delegateTo: ${planModeResult.delegateTo}`
+        );
+
+        // W6.4 沒有活躍路由時 EnterPlanMode 被 allow
+        const routingPath = path.join(tempDir, '.vibe-engine', 'routing-state.json');
+        fs.writeFileSync(routingPath, JSON.stringify({ status: 'completed', phases: [] }));
+        const planModeNoRoute = evalRouting({ tool_name: 'EnterPlanMode' });
+        assert(
+          planModeNoRoute.decision === 'allow',
+          'W6.4 無活躍路由時 EnterPlanMode 被 allow',
+          `decision: ${planModeNoRoute.decision}`
+        );
+
+        // 恢復路由狀態供後續測試
+        fs.writeFileSync(routingPath, JSON.stringify({
+          planId: 'test-plan-w6',
+          status: 'in_progress',
+          phases: [{
+            phase: 1,
+            tasks: [{ id: 'task-1', agent: 'architect', status: 'pending', description: '設計架構' }]
+          }]
+        }));
+
+        // W6.5 deny 訊息包含 EnterPlanMode 提示
+        const denyMsg = buildDeny({
+          delegateTo: 'architect',
+          planId: 'test-plan-w6',
+          taskId: 'task-1',
+          taskDescription: '設計遊戲架構'
+        });
+        assert(
+          denyMsg.includes('EnterPlanMode'),
+          'W6.5 deny 訊息包含 EnterPlanMode 關鍵字',
+          `includes: ${denyMsg.includes('EnterPlanMode')}`
+        );
+      }
+    } catch (err) {
+      console.log(`❌ W6 錯誤: ${err.message}`);
+    }
+
   } finally {
     process.env.CLAUDE_PROJECT_ROOT = originalRoot;
     fs.rmSync(tempDir, { recursive: true, force: true });
