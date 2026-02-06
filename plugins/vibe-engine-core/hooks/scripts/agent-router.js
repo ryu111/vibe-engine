@@ -17,8 +17,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { getProjectRoot } = require('./lib/common');
+const { getProjectRoot, generateId } = require('./lib/common');
 const { parseSimpleYaml } = require('./lib/yaml-parser');
+const { RoutingStateManager } = require('./lib/routing-state-manager');
 
 // ============================================================
 // 配置
@@ -390,7 +391,7 @@ const InstructionFormatter = {
 };
 
 /**
- * 生成路由指令（重構後）
+ * 生成路由指令（重構後 - 舊版保留供參考）
  */
 function generateRoutingInstructions(plan, originalRequest) {
   if (!plan || plan.phases.length === 0) {
@@ -403,6 +404,67 @@ function generateRoutingInstructions(plan, originalRequest) {
     ...InstructionFormatter.formatGuidelines(),
     ...InstructionFormatter.formatExamples(plan.phases)
   ].join('\n');
+}
+
+// ============================================================
+// 強制執行指令生成器（新版 - 自動路由）
+// ============================================================
+
+/**
+ * 生成強制執行指令
+ * 這不是建議，而是必須執行的指令
+ */
+function generateRoutingDirective(plan, planId, originalRequest) {
+  if (!plan || plan.phases.length === 0) {
+    return null;
+  }
+
+  const lines = [
+    '',
+    '╔══════════════════════════════════════════════════════════════════╗',
+    '║  ⚠️  MANDATORY EXECUTION DIRECTIVE - 強制執行指令                 ║',
+    '╠══════════════════════════════════════════════════════════════════╣',
+    `║  Plan ID: ${planId.padEnd(53)}║`,
+    `║  Strategy: ${plan.strategy.padEnd(52)}║`,
+    `║  Total Tasks: ${String(plan.phases.reduce((s, p) => s + p.tasks.length, 0)).padEnd(49)}║`,
+    '╠══════════════════════════════════════════════════════════════════╣',
+    '║  此路由計劃為【強制執行】，不可跳過或自行決定。                   ║',
+    '╚══════════════════════════════════════════════════════════════════╝',
+    ''
+  ];
+
+  // 每個 Phase 的任務
+  for (const phase of plan.phases) {
+    lines.push(`### Phase ${phase.phase} ${phase.parallel ? '(並行執行)' : '(序列執行)'}`);
+    lines.push('');
+
+    for (const task of phase.tasks) {
+      lines.push(`**MUST**: 使用 Task tool 執行以下任務`);
+      lines.push('```');
+      lines.push(`Task({`);
+      lines.push(`  subagent_type: "vibe-engine-core:${task.agent}",`);
+      lines.push(`  description: "${task.description.slice(0, 40)}...",`);
+      lines.push(`  prompt: "${task.description}",`);
+      lines.push(`  model: "${task.model}"`);
+      lines.push(`})`);
+      lines.push('```');
+      lines.push('');
+    }
+  }
+
+  // 執行規則
+  lines.push('---');
+  lines.push('### 執行規則 (MUST FOLLOW)');
+  lines.push('');
+  lines.push('1. **必須**按 Phase 順序執行，同一 Phase 可並行');
+  lines.push('2. **每個 MUST 項目都必須執行**，不可跳過任何一個');
+  lines.push('3. 如遇到錯誤，報告錯誤但**繼續執行**其他任務');
+  lines.push(`4. 完成所有任務後，在回覆末尾標記: \`[Routing Complete: ${planId}]\``);
+  lines.push('');
+  lines.push('⛔ **違反此指令將導致任務被判定為未完成，Stop hook 會強制要求繼續執行**');
+  lines.push('');
+
+  return lines.join('\n');
 }
 
 // ============================================================
@@ -507,19 +569,27 @@ async function main() {
     return;
   }
 
-  // 生成路由指令
-  const instructions = generateRoutingInstructions(plan, userPrompt);
+  // 創建路由狀態追蹤
+  const routingManager = new RoutingStateManager(PROJECT_ROOT);
+  const routingState = routingManager.createPlan(plan, userPrompt);
+  const planId = routingState.planId;
+
+  // 生成強制執行指令（新版）
+  const directive = generateRoutingDirective(plan, planId, userPrompt);
 
   // 輸出結果
   const output = {
     continue: true,
     suppressOutput: false,
-    systemMessage: instructions,
+    systemMessage: directive,
     hookSpecificOutput: {
       routing: plan.strategy,
+      planId: planId,
       phases: plan.phases.length,
       agents: plan.agents,
-      estimatedCost: plan.estimatedCost
+      estimatedCost: plan.estimatedCost,
+      totalTasks: routingState.totalCount,
+      isDirective: true  // 標記這是強制指令
     }
   };
 
@@ -533,7 +603,8 @@ module.exports = {
   shouldDirectResponse,
   selectAgent,
   generateRoutingPlan,
-  generateRoutingInstructions
+  generateRoutingInstructions,
+  generateRoutingDirective  // 新增
 };
 
 // 執行

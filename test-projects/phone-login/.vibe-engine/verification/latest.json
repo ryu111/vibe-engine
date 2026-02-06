@@ -1,0 +1,39 @@
+{
+  "verification_report": {
+    "level": "standard",
+    "status": "fail",
+    "timestamp": "2026-02-06T12:01:14.658Z",
+    "project_type": "nodejs",
+    "budget_remaining": "100%",
+    "layers": {
+      "static": {
+        "status": "fail",
+        "checks": [
+          {
+            "name": "typecheck",
+            "status": "fail",
+            "priority": "P0",
+            "output": "Command failed: npx tsc --noEmit"
+          },
+          {
+            "name": "lint",
+            "status": "pass",
+            "priority": "P1"
+          },
+          {
+            "name": "build",
+            "status": "pass",
+            "priority": "P0"
+          }
+        ]
+      }
+    },
+    "blocking_issues": [
+      "[P0] typecheck: Command failed: npx tsc --noEmit"
+    ],
+    "warnings": [],
+    "recommendations": [
+      "修復所有 P0 blocking issues 後重新驗證"
+    ]
+  }
+}

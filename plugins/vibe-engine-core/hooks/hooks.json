@@ -79,6 +79,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/routing-completion-validator.js\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/completion-check.js\"",
             "timeout": 10
           },

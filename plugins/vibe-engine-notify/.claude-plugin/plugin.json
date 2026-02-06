@@ -1,0 +1,11 @@
+{
+  "name": "vibe-engine-notify",
+  "version": "0.1.0",
+  "description": "Telegram notification for Vibe Engine task completion",
+  "author": "Vibe Engine Team",
+  "repository": "https://github.com/user/vibe-engine",
+  "entrypoint": "CLAUDE.md",
+  "dependencies": {
+    "plugins": ["vibe-engine-core"]
+  }
+}

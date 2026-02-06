@@ -1,0 +1,216 @@
+.phone-login {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.login-card {
+  background: var(--card-bg, #ffffff);
+  border-radius: 12px;
+  padding: 32px;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.1);
+}
+
+.login-card h2 {
+  margin: 0 0 24px;
+  font-size: 1.5rem;
+  text-align: center;
+  color: var(--text-color, #333);
+}
+
+/* Input Group */
+.input-group {
+  margin-bottom: 20px;
+}
+
+.input-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: var(--text-color, #333);
+}
+
+.input-group input {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 1rem;
+  border: 2px solid var(--border-color, #e0e0e0);
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.2s;
+  background: var(--input-bg, #fff);
+  color: var(--text-color, #333);
+  box-sizing: border-box;
+}
+
+.input-group input:focus {
+  border-color: var(--primary-color, #4a90d9);
+}
+
+.input-group input:disabled {
+  background: var(--disabled-bg, #f5f5f5);
+  cursor: not-allowed;
+}
+
+.input-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.85rem;
+  color: var(--hint-color, #888);
+}
+
+/* Error Message */
+.error-message {
+  padding: 12px;
+  margin-bottom: 16px;
+  background: var(--error-bg, #fff5f5);
+  border: 1px solid var(--error-border, #ffccc7);
+  border-radius: 8px;
+  color: var(--error-color, #cf1322);
+  font-size: 0.9rem;
+}
+
+/* Buttons */
+.submit-btn {
+  width: 100%;
+  padding: 14px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: white;
+  background: var(--primary-color, #4a90d9);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.submit-btn:hover:not(:disabled) {
+  background: var(--primary-hover, #357abd);
+}
+
+.submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Verification Form */
+.verification-header {
+  margin-bottom: 16px;
+}
+
+.back-btn {
+  padding: 8px 12px;
+  font-size: 0.9rem;
+  color: var(--text-secondary, #666);
+  background: transparent;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.back-btn:hover:not(:disabled) {
+  background: var(--hover-bg, #f5f5f5);
+}
+
+.verification-hint {
+  margin-bottom: 20px;
+  color: var(--text-secondary, #666);
+  font-size: 0.95rem;
+}
+
+.resend-section {
+  margin-top: 20px;
+  text-align: center;
+}
+
+.countdown {
+  color: var(--text-secondary, #888);
+  font-size: 0.9rem;
+}
+
+.resend-btn {
+  padding: 10px 20px;
+  font-size: 0.9rem;
+  color: var(--primary-color, #4a90d9);
+  background: transparent;
+  border: 1px solid var(--primary-color, #4a90d9);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.resend-btn:hover:not(:disabled) {
+  background: var(--primary-light, #f0f7ff);
+}
+
+/* Success Card */
+.success-card {
+  text-align: center;
+}
+
+.success-icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 16px;
+  background: var(--success-color, #52c41a);
+  color: white;
+  font-size: 2rem;
+  line-height: 64px;
+  border-radius: 50%;
+}
+
+.user-info {
+  margin: 24px 0;
+  padding: 16px;
+  background: var(--info-bg, #f9f9f9);
+  border-radius: 8px;
+  text-align: left;
+}
+
+.user-info p {
+  margin: 8px 0;
+  color: var(--text-color, #333);
+}
+
+.logout-btn {
+  padding: 12px 24px;
+  font-size: 0.95rem;
+  color: var(--error-color, #cf1322);
+  background: transparent;
+  border: 1px solid var(--error-color, #cf1322);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.logout-btn:hover {
+  background: var(--error-light, #fff5f5);
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --card-bg: #2a2a2a;
+    --text-color: #e0e0e0;
+    --text-secondary: #aaa;
+    --border-color: #444;
+    --input-bg: #333;
+    --disabled-bg: #3a3a3a;
+    --hover-bg: #3a3a3a;
+    --hint-color: #888;
+    --error-bg: #3d1f1f;
+    --error-border: #6b2626;
+    --error-color: #ff7875;
+    --error-light: #3d1f1f;
+    --primary-color: #5fa3e8;
+    --primary-hover: #4a90d9;
+    --primary-light: #1a3050;
+    --info-bg: #333;
+    --success-color: #73d13d;
+  }
+}

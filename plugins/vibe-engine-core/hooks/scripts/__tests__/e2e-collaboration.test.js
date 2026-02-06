@@ -8,6 +8,7 @@
  * C. 簡單查詢 - 跳過分解
  * D. 預算耗盡 - 阻止操作
  * E. 數據流 - 序列化完整性
+ * F. 自動路由執行 - 強制指令 + 狀態追蹤 + 閉環驗證
  */
 
 const path = require('path');
@@ -394,6 +395,194 @@ async function testDataFlowIntegrity() {
 }
 
 // ============================================================
+// 場景 F: 自動路由執行驗證
+// ============================================================
+async function testAutoRoutingExecution() {
+  console.log('\n═══════════════════════════════════════');
+  console.log('場景 F: 自動路由執行驗證');
+  console.log('═══════════════════════════════════════\n');
+
+  // 導入新的模組
+  const { RoutingStateManager } = require(path.join(SCRIPTS_DIR, 'lib/routing-state-manager'));
+  const { generateRoutingDirective } = require(path.join(SCRIPTS_DIR, 'agent-router'));
+  const {
+    hasCompletionMarker,
+    generateContinueDirective,
+    generateFailureReport
+  } = require(path.join(SCRIPTS_DIR, 'routing-completion-validator'));
+
+  const userPrompt = '新增用戶登入功能';
+
+  // Step 1: 生成分解和路由
+  console.log('📋 Step 1: 生成路由計劃');
+  const classification = { complexity: 'complex', intent: 'action' };
+  const decomposition = decomposeTask(userPrompt, classification);
+  const plan = generateRoutingPlan(decomposition, classification);
+
+  assert(
+    plan && plan.phases && plan.phases.length > 0,
+    'F1.1 生成有效的路由計劃',
+    `phases: ${plan?.phases?.length}`
+  );
+
+  // Step 2: 生成強制執行指令
+  console.log('\n📋 Step 2: 生成強制執行指令');
+  const planId = `route-${Date.now()}`;
+  const directive = generateRoutingDirective(plan, planId, userPrompt);
+
+  assert(
+    directive && directive.includes('MANDATORY'),
+    'F2.1 指令包含 MANDATORY 標記',
+    `有 MANDATORY: ${directive?.includes('MANDATORY')}`
+  );
+
+  assert(
+    directive && directive.includes('MUST'),
+    'F2.2 指令包含 MUST 標記',
+    `有 MUST: ${directive?.includes('MUST')}`
+  );
+
+  assert(
+    directive && directive.includes(planId),
+    'F2.3 指令包含 Plan ID',
+    `有 planId: ${directive?.includes(planId)}`
+  );
+
+  // Step 3: 路由狀態管理
+  console.log('\n📋 Step 3: 路由狀態管理');
+  const tempDir = path.join(__dirname, '.test-temp-' + Date.now());
+  const vibeDir = path.join(tempDir, '.vibe-engine');
+  fs.mkdirSync(vibeDir, { recursive: true });
+
+  // 設置環境變數讓 RoutingStateManager 使用測試目錄
+  const originalRoot = process.env.CLAUDE_PROJECT_ROOT;
+  process.env.CLAUDE_PROJECT_ROOT = tempDir;
+
+  try {
+    const manager = new RoutingStateManager(tempDir);
+    const state = manager.createPlan(plan, userPrompt);
+
+    assert(
+      state && state.planId,
+      'F3.1 創建路由狀態',
+      `planId: ${state?.planId}`
+    );
+
+    assert(
+      state.status === 'pending' && state.totalCount > 0,
+      'F3.2 初始狀態正確',
+      `status: ${state?.status}, total: ${state?.totalCount}`
+    );
+
+    // Step 4: 狀態追蹤
+    console.log('\n📋 Step 4: 狀態追蹤');
+    const firstTask = state.phases[0]?.tasks[0];
+    if (firstTask) {
+      manager.markTaskStarted(firstTask.id);
+      const updatedState = manager.load();
+
+      assert(
+        updatedState.status === 'in_progress',
+        'F4.1 標記任務開始後狀態更新',
+        `status: ${updatedState?.status}`
+      );
+
+      manager.markTaskCompleted(firstTask.id);
+      const afterComplete = manager.load();
+
+      assert(
+        afterComplete.completedCount === 1,
+        'F4.2 完成計數正確',
+        `completed: ${afterComplete?.completedCount}`
+      );
+    }
+
+    // Step 5: 未完成任務檢測
+    console.log('\n📋 Step 5: 未完成任務檢測');
+    const pending = manager.getPendingTasks();
+
+    assert(
+      pending.length > 0,
+      'F5.1 正確獲取未完成任務',
+      `pending: ${pending.length}`
+    );
+
+    // Step 6: 完成標記檢測
+    console.log('\n📋 Step 6: 完成標記檢測');
+    const testPlanId = 'route-test-123';
+    const hasMarker = hasCompletionMarker(`完成了 [Routing Complete: ${testPlanId}]`, testPlanId);
+    const noMarker = hasCompletionMarker('一般的回覆內容', testPlanId);
+
+    assert(
+      hasMarker === true,
+      'F6.1 檢測到完成標記',
+      `hasMarker: ${hasMarker}`
+    );
+
+    assert(
+      noMarker === false,
+      'F6.2 沒有標記時正確返回 false',
+      `noMarker: ${noMarker}`
+    );
+
+    // Step 7: 繼續指令生成
+    console.log('\n📋 Step 7: 繼續指令生成');
+    const continueDirective = generateContinueDirective(
+      pending,
+      state.planId,
+      { currentRetry: 1, maxRetries: 3 }
+    );
+
+    assert(
+      continueDirective && continueDirective.includes('INCOMPLETE'),
+      'F7.1 繼續指令包含 INCOMPLETE',
+      `有 INCOMPLETE: ${continueDirective?.includes('INCOMPLETE')}`
+    );
+
+    // Step 8: 失敗報告生成
+    console.log('\n📋 Step 8: 失敗報告生成');
+    const failureReport = generateFailureReport(
+      pending,
+      state.planId,
+      { currentRetry: 3, maxRetries: 3 }
+    );
+
+    assert(
+      failureReport && failureReport.includes('FAILED'),
+      'F8.1 失敗報告包含 FAILED',
+      `有 FAILED: ${failureReport?.includes('FAILED')}`
+    );
+
+    // Step 9: 重試機制
+    console.log('\n📋 Step 9: 重試機制');
+    let retryInfo = manager.incrementRetry();
+
+    assert(
+      retryInfo.canRetry === true && retryInfo.currentRetry === 1,
+      'F9.1 第一次重試',
+      `canRetry: ${retryInfo.canRetry}, current: ${retryInfo.currentRetry}`
+    );
+
+    // 模擬達到最大重試
+    manager.incrementRetry();
+    retryInfo = manager.incrementRetry();
+
+    assert(
+      retryInfo.canRetry === false && retryInfo.currentRetry === 3,
+      'F9.2 達到最大重試次數',
+      `canRetry: ${retryInfo.canRetry}, current: ${retryInfo.currentRetry}`
+    );
+
+  } finally {
+    // 清理測試目錄
+    process.env.CLAUDE_PROJECT_ROOT = originalRoot;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  console.log('\n✅ 場景 F 完成');
+}
+
+// ============================================================
 // 主測試執行
 // ============================================================
 async function runAllTests() {
@@ -408,6 +597,7 @@ async function runAllTests() {
     await testSimpleQueryWorkflow();
     await testBudgetExceededWorkflow();
     await testDataFlowIntegrity();
+    await testAutoRoutingExecution();  // 新增場景 F
   } catch (error) {
     console.error('\n❌ 測試執行錯誤:', error.message);
     console.error(error.stack);

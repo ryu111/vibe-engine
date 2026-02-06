@@ -1,0 +1,18 @@
+{
+  "description": "Vibe Engine Notify - Telegram notifications for task completion",
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/notify-on-complete.js\"",
+            "timeout": 15
+          }
+        ],
+        "description": "Send Telegram notification when routing task completes or fails"
+      }
+    ]
+  }
+}
