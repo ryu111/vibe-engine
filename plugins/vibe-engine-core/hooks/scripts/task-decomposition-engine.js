@@ -17,7 +17,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { getProjectRoot } = require('./lib/common');
+const { getProjectRoot, getVibeEnginePaths, safeReadJSON } = require('./lib/common');
 const { readHookInput, writeHookOutput } = require('./lib/hook-io');
 const { jsonToYaml } = require('./lib/yaml-parser');
 const { sanitizePrompt, detectCompoundRequirements } = require('./prompt-classifier');
@@ -607,7 +607,9 @@ async function main() {
 
     if (hookInput?.user_prompt) {
       prompt = hookInput.user_prompt;
-      classificationResult = hookInput.hookSpecificOutput;
+      // 從共享檔案讀取 prompt-classifier 的分類結果
+      const paths = getVibeEnginePaths();
+      classificationResult = safeReadJSON(path.join(paths.root, 'last-classification.json'));
     } else if (rawInput) {
       prompt = rawInput;
     }

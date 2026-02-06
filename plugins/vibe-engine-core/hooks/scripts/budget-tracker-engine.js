@@ -18,7 +18,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { getProjectRoot, ensureVibeEngineDirs } = require('./lib/common');
+const { getProjectRoot, ensureVibeEngineDirs, getVibeEnginePaths, safeReadJSON } = require('./lib/common');
 const { parseSimpleYaml } = require('./lib/yaml-parser');
 const {
   ALERT_THRESHOLDS: LIB_ALERT_THRESHOLDS,
@@ -518,8 +518,11 @@ function parseHookInput(input, initialSessionId, initialUsage) {
       hookType = hookInput.tool_result ? 'PostToolUse' : 'PreToolUse';
     }
 
-    if (hookInput.hookSpecificOutput?.complexity) {
-      complexity = hookInput.hookSpecificOutput.complexity;
+    // 從共享檔案讀取 prompt-classifier 的分類結果
+    const classificationPaths = getVibeEnginePaths();
+    const classificationData = safeReadJSON(path.join(classificationPaths.root, 'last-classification.json'));
+    if (classificationData?.complexity) {
+      complexity = classificationData.complexity;
     }
 
     // PostToolUse 時記錄 token 使用

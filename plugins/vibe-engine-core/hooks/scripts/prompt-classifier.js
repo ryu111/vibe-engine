@@ -120,6 +120,8 @@ function detectCompoundRequirements(prompt) {
   return { count, hasRequirementVerb, conjunctions };
 }
 
+const { getVibeEnginePaths, safeWriteJSON } = require('./lib/common');
+
 // ============================================================
 // 請求類型
 // ============================================================
@@ -295,6 +297,14 @@ function main() {
 
       // 分類請求
       const classification = classifyRequest(userPrompt);
+
+      // 寫入共享檔案供下游 hooks 讀取
+      const paths = getVibeEnginePaths();
+      safeWriteJSON(path.join(paths.root, 'last-classification.json'), {
+        ...classification,
+        timestamp: Date.now(),
+        prompt: userPrompt.substring(0, 200)
+      }, false);
 
       // 輸出分類結果
       const output = {

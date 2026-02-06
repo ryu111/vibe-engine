@@ -17,7 +17,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { getProjectRoot, generateId } = require('./lib/common');
+const { getProjectRoot, generateId, getVibeEnginePaths, safeReadJSON } = require('./lib/common');
 const { parseSimpleYaml } = require('./lib/yaml-parser');
 const { RoutingStateManager } = require('./lib/routing-state-manager');
 
@@ -497,16 +497,13 @@ async function main() {
     });
   }
 
-  // 取得分類結果（從 hookInput 或環境變數）
-  let classification = {
+  // 從共享檔案讀取 prompt-classifier 的分類結果
+  const paths = getVibeEnginePaths();
+  const classification = safeReadJSON(path.join(paths.root, 'last-classification.json'), {
     complexity: 'moderate',
     requestType: 'action',
     suggestedAgent: null
-  };
-
-  if (hookInput && hookInput.hookSpecificOutput) {
-    classification = hookInput.hookSpecificOutput;
-  }
+  });
 
   const userPrompt = hookInput?.user_prompt || '';
 
