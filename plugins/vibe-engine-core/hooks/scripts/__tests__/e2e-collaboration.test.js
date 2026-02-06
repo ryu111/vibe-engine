@@ -13,6 +13,7 @@
  * H. Hook Chain 管道整合測試（真實進程 stdin/stdout）
  * I. 分類器準確性回歸測試（路徑消除、Segmenter 詞數、複合需求、分類結果）
  * J. 缺口修復驗證（計分制模式識別、中文直接回答、完成聚合器、複合需求整合）
+ * K. 100% 完成度驗證（byContentType、maxConcurrent、getExecutableTasks、classifyError、診斷指令）
  */
 
 const path = require('path');
@@ -44,6 +45,17 @@ const {
 const {
   aggregateTaskState, shouldDefer, generateCompletionSummary
 } = require(path.join(SCRIPTS_DIR, 'completion-check'));
+const {
+  generateParallelGroups, MAX_CONCURRENT_PER_TYPE, MAX_PARALLEL_AGENTS
+} = require(path.join(SCRIPTS_DIR, 'task-decomposition-engine'));
+const { RoutingStateManager, CONCURRENCY_LIMITS } =
+  require(path.join(SCRIPTS_DIR, 'lib/routing-state-manager'));
+
+// error-handler（跨 plugin import）
+let classifyError;
+try {
+  ({ classifyError } = require(path.join(__dirname, '../../../../vibe-engine-guarantee/hooks/scripts/error-handler')));
+} catch { classifyError = null; }
 
 // 測試上下文
 const testContext = {
@@ -1305,6 +1317,172 @@ async function testGapFixes() {
 }
 
 // ============================================================
+// 場景 K: 100% 完成度驗證
+// ============================================================
+async function testHundredPercentCompletion() {
+  console.log('\n═══════════════════════════════════════');
+  console.log('場景 K: 100% 完成度驗證');
+  console.log('═══════════════════════════════════════\n');
+
+  // ── K1: byContentType 分解策略 ──
+  console.log('📋 Step 1: byContentType 分解策略');
+
+  const docPattern = identifyTaskPattern('更新 README 文檔和 API 說明');
+  assert(
+    docPattern.name === 'documentation',
+    'K1.1 文檔任務識別為 documentation 模式',
+    `actual: ${docPattern.name}`
+  );
+  assert(
+    docPattern.decomposition === 'byContentType',
+    'K1.2 documentation 使用 byContentType 策略',
+    `actual: ${docPattern.decomposition}`
+  );
+
+  const docDecomp = decomposeTask('更新 README 說明和 API 介面文檔', { complexity: 'moderate' });
+  const docSubtasks = docDecomp.task_decomposition.subtasks;
+  assert(
+    docSubtasks.length >= 2,
+    'K1.3 多種內容類型（readme + api-doc）產生多個子任務',
+    `subtasks: ${docSubtasks.length}`
+  );
+
+  // ── K2: maxConcurrent 並行限制 ──
+  console.log('\n📋 Step 2: maxConcurrent 並行限制');
+
+  assert(
+    MAX_CONCURRENT_PER_TYPE.developer === 2,
+    'K2.1 developer maxConcurrent 為 2',
+    `actual: ${MAX_CONCURRENT_PER_TYPE.developer}`
+  );
+  assert(
+    MAX_PARALLEL_AGENTS === 4,
+    'K2.2 全局最大並行 agent 為 4',
+    `actual: ${MAX_PARALLEL_AGENTS}`
+  );
+
+  // 建構 5 個無依賴 developer 任務測試分組
+  const fakeSubtasks = [];
+  for (let i = 1; i <= 5; i++) {
+    fakeSubtasks.push({
+      id: `task-${i}`, agent: 'developer', depends_on: []
+    });
+  }
+  const groups = generateParallelGroups(fakeSubtasks);
+  // 每個 group 最多 2 個 developer
+  const maxDevInGroup = Math.max(...groups.map(g =>
+    g.filter(id => fakeSubtasks.find(t => t.id === id).agent === 'developer').length
+  ));
+  assert(
+    maxDevInGroup <= 2,
+    'K2.3 每個 parallel group 中 developer 不超過 2',
+    `maxDevInGroup: ${maxDevInGroup}, groups: ${groups.length}`
+  );
+
+  // ── K3: getExecutableTasks 並行限制 ──
+  console.log('\n📋 Step 3: getExecutableTasks 並行限制');
+
+  const tempDir = path.join(__dirname, '.test-temp-k-' + Date.now());
+  const vibeDir = path.join(tempDir, '.vibe-engine');
+  fs.mkdirSync(vibeDir, { recursive: true });
+  const originalRoot = process.env.CLAUDE_PROJECT_ROOT;
+  process.env.CLAUDE_PROJECT_ROOT = tempDir;
+
+  try {
+    const manager = new RoutingStateManager(tempDir);
+    const testPlan = {
+      strategy: 'hybrid',
+      phases: [{
+        parallel: true,
+        tasks: [
+          { id: 'dev-1', agent: 'developer', description: 'task 1' },
+          { id: 'dev-2', agent: 'developer', description: 'task 2' },
+          { id: 'dev-3', agent: 'developer', description: 'task 3' }
+        ]
+      }]
+    };
+    manager.createPlan(testPlan, 'test');
+
+    // 標記 1 個為 executing
+    manager.markTaskStarted('dev-1');
+
+    const executable = manager.getExecutableTasks();
+    // dev 上限 2，已 executing 1，所以最多可再派 1 個
+    assert(
+      executable.length <= 1,
+      'K3.1 getExecutableTasks 考慮 agent 並行上限（已執行 1，可再派 ≤1）',
+      `executable: ${executable.length}`
+    );
+
+    // 確認 getPendingTasks 仍返回所有 pending（不受限制）
+    const pending = manager.getPendingTasks();
+    assert(
+      pending.length === 2,
+      'K3.2 getPendingTasks 不受 agent 限制，返回所有 pending',
+      `pending: ${pending.length}`
+    );
+  } finally {
+    process.env.CLAUDE_PROJECT_ROOT = originalRoot;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  // ── K4: classifyError 四分類 ──
+  console.log('\n📋 Step 4: 錯誤四分類');
+
+  if (classifyError) {
+    assert(
+      classifyError([]).type === 'none',
+      'K4.1 空錯誤分類為 none',
+      `actual: ${classifyError([]).type}`
+    );
+    assert(
+      classifyError([{ type: 'test_failure', count: 3 }]).type === 'logic',
+      'K4.2 test_failure 分類為 logic',
+      `actual: ${classifyError([{ type: 'test_failure', count: 3 }]).type}`
+    );
+    assert(
+      classifyError([{ type: 'ETIMEDOUT', count: 1 }]).type === 'transient',
+      'K4.3 ETIMEDOUT 分類為 transient',
+      `actual: ${classifyError([{ type: 'ETIMEDOUT', count: 1 }]).type}`
+    );
+    assert(
+      classifyError([{ type: 'deployed', count: 1 }]).type === 'irreversible',
+      'K4.4 deployed 分類為 irreversible',
+      `actual: ${classifyError([{ type: 'deployed', count: 1 }]).type}`
+    );
+  } else {
+    console.log('⚠️ classifyError 無法載入（跨 plugin），跳過 K4');
+  }
+
+  // ── K5: generateFixDirective 包含診斷步驟 ──
+  console.log('\n📋 Step 5: 修復指令包含診斷步驟');
+
+  const fixDir = generateFixDirective(['Type error in auth.ts'], 1);
+  assert(
+    fixDir.includes('diagnos') || fixDir.includes('root cause'),
+    'K5.1 修復指令包含診斷要求',
+    `directive snippet: ${fixDir.substring(0, 120)}`
+  );
+  // 確保保留既有關鍵字（場景 G 依賴）
+  assert(
+    fixDir.includes('iteration 1/') && fixDir.includes('attempt(s) remaining'),
+    'K5.2 修復指令保留 iteration 和 remaining 文字',
+    `directive snippet: ${fixDir.substring(0, 80)}`
+  );
+
+  // ── K6: CONCURRENCY_LIMITS 一致性 ──
+  console.log('\n📋 Step 6: 並行限制一致性');
+
+  assert(
+    CONCURRENCY_LIMITS.developer === MAX_CONCURRENT_PER_TYPE.developer,
+    'K6.1 routing-state-manager 和 task-decomposition 的 developer 限制一致',
+    `RSM: ${CONCURRENCY_LIMITS.developer}, TDE: ${MAX_CONCURRENT_PER_TYPE.developer}`
+  );
+
+  console.log('\n✅ 場景 K 完成');
+}
+
+// ============================================================
 // 主測試執行
 // ============================================================
 async function runAllTests() {
@@ -1324,6 +1502,7 @@ async function runAllTests() {
     await testHookChainPipeline();        // 場景 H
     await testClassifierAccuracy();       // 場景 I
     await testGapFixes();                  // 場景 J
+    await testHundredPercentCompletion();  // 場景 K
   } catch (error) {
     console.error('\n❌ 測試執行錯誤:', error.message);
     console.error(error.stack);

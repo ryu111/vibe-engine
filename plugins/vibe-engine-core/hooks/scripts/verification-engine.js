@@ -791,9 +791,12 @@ function generateFixDirective(blockingIssues, iteration) {
     `⚠️ ${remaining} attempt(s) remaining before task is blocked.`,
     '',
     'Instructions:',
-    '1. Fix ALL blocking issues listed above',
-    '2. Re-run tests/checks to confirm fixes',
-    '3. Verification will re-run automatically on next Stop'
+    '1. First diagnose the root cause of each blocking issue',
+    '2. Fix ALL blocking issues based on diagnosis',
+    '3. Re-run tests/checks to confirm fixes',
+    '4. Verification will re-run automatically on next Stop',
+    '',
+    '⛔ Do NOT skip diagnosis — fix without understanding the root cause leads to regression.'
   ].join('\n');
 }
 

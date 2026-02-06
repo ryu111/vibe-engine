@@ -16,6 +16,11 @@ const { getVibeEnginePaths, safeReadJSON, safeWriteJSON, generateId, now } = req
 
 const ROUTING_STATE_FILE = 'routing-state.json';
 
+// Agent 並行限制
+const CONCURRENCY_LIMITS = {
+  architect: 1, developer: 2, tester: 1, reviewer: 1, explorer: 3
+};
+
 /**
  * 路由狀態管理器
  */
@@ -225,6 +230,41 @@ class RoutingStateManager {
   }
 
   /**
+   * 獲取可立即執行的任務（考慮 agent 並行上限）
+   * 與 getPendingTasks() 不同：getPendingTasks 返回所有待執行任務（用於完成度判斷），
+   * getExecutableTasks 考慮正在執行的 agent 數量限制（用於實際分派）
+   * @returns {Array} 可立即分派的任務
+   */
+  getExecutableTasks() {
+    const state = this.load();
+    if (!state || state.status === 'completed' || state.status === 'cancelled') {
+      return [];
+    }
+
+    // 統計正在執行的 agent 數量
+    const executingByAgent = {};
+    for (const phase of state.phases) {
+      for (const task of phase.tasks) {
+        if (task.status === 'executing') {
+          executingByAgent[task.agent] = (executingByAgent[task.agent] || 0) + 1;
+        }
+      }
+    }
+
+    // 過濾：只返回不超過並行限制的任務
+    const pending = this.getPendingTasks();
+    return pending.filter(task => {
+      const limit = CONCURRENCY_LIMITS[task.agent] || 2;
+      const current = executingByAgent[task.agent] || 0;
+      if (current < limit) {
+        executingByAgent[task.agent] = current + 1;
+        return true;
+      }
+      return false;
+    });
+  }
+
+  /**
    * 檢查計劃是否完成
    * @returns {boolean}
    */
@@ -359,5 +399,6 @@ class RoutingStateManager {
 
 module.exports = {
   RoutingStateManager,
-  ROUTING_STATE_FILE
+  ROUTING_STATE_FILE,
+  CONCURRENCY_LIMITS
 };

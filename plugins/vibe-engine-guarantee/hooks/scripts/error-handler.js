@@ -127,6 +127,41 @@ function parseSubagentOutput() {
   };
 }
 
+/**
+ * 錯誤四分類（transient/compensatable/logic/irreversible）
+ */
+function classifyError(errors) {
+  if (!errors || errors.length === 0) {
+    return { type: 'none', confidence: 1.0, strategy: 'none' };
+  }
+
+  const transientPatterns = [
+    'econnreset', 'etimedout', 'enotfound', 'rate_limit', '429', '503', '504'
+  ];
+  const irreversiblePatterns = [
+    'email_sent', 'deployed', 'api_key_exposed', 'published'
+  ];
+  const compensatablePatterns = [
+    'partial_commit', 'file_write_failed'
+  ];
+
+  for (const error of errors) {
+    const errorStr = JSON.stringify(error).toLowerCase();
+
+    if (irreversiblePatterns.some(p => errorStr.includes(p))) {
+      return { type: 'irreversible', confidence: 0.9, strategy: 'escalate' };
+    }
+    if (transientPatterns.some(p => errorStr.includes(p))) {
+      return { type: 'transient', confidence: 0.8, strategy: 'retry_with_backoff' };
+    }
+    if (compensatablePatterns.some(p => errorStr.includes(p))) {
+      return { type: 'compensatable', confidence: 0.7, strategy: 'rollback_and_retry' };
+    }
+  }
+
+  return { type: 'logic', confidence: 0.6, strategy: 'fix_and_retry' };
+}
+
 function shouldAutoFix(errors) {
   // Determine if errors are auto-fixable
   const autoFixableTypes = [
@@ -233,13 +268,36 @@ function handleFailure(state, result) {
     };
   }
 
-  // Determine if we can auto-fix
+  // 錯誤分類
+  const classification = classifyError(result.errors);
+
+  // 不可逆錯誤直接 escalate
+  if (classification.type === 'irreversible') {
+    return {
+      systemMessage: `⛔ IRREVERSIBLE ERROR — Cannot auto-fix.\n\n${generateEscalationReport(state, result)}`,
+      escalate: true,
+      errorClassification: classification,
+      stateUpdate: { ...DEFAULT_STATE }
+    };
+  }
+
+  // 暫態錯誤：不消耗迭代次數
+  if (classification.type === 'transient') {
+    return {
+      systemMessage: `⏳ TRANSIENT ERROR — Will retry with backoff.\nType: ${classification.type} (confidence: ${classification.confidence})`,
+      errorClassification: classification,
+      stateUpdate: state
+    };
+  }
+
+  // 其餘（logic/compensatable）走原有流程
   const fixability = shouldAutoFix(result.errors);
 
   if (!fixability.canAutoFix) {
     return {
       systemMessage: `⛔ CRITICAL: Errors detected but not auto-fixable.\n\nError types found:\n${result.errors.map(e => `  - ${e.type}: ${e.count} issue(s)`).join('\n')}\n\n⛔ BLOCK: Auto-fix not possible. MUST escalate to user for manual intervention.`,
       escalate: true,
+      errorClassification: classification,
       stateUpdate: state
     };
   }
@@ -264,6 +322,16 @@ function handleFailure(state, result) {
 
   const plan = generateAutoFixPlan(state, result);
 
+  // 生成 MANDATORY debugger 調用指令
+  const mandatorySteps = plan.steps.map((step, i) => {
+    const lines = [`**MUST ${i + 1}**: Use Task tool to invoke ${step.agent}`];
+    lines.push(`  Task({ subagent_type: "vibe-engine-guarantee:${step.agent}", prompt: "${step.task}" })`);
+    if (step.followUp) {
+      lines.push(`  → Then MUST invoke ${step.followUp.agent}: "${step.followUp.task}"`);
+    }
+    return lines.join('\n');
+  }).join('\n\n');
+
   // Generate checkpoint message for iteration
   const checkpointMessage = `
 [CHECKPOINT] Auto-Fix Iteration ${newState.iteration}/${CONFIG.maxAutoFixIterations}
@@ -273,8 +341,20 @@ function handleFailure(state, result) {
 └─ 下一步：execute fix plan`;
 
   return {
-    systemMessage: `[Auto-Fix Loop] 🔄 Iteration ${newState.iteration}/${CONFIG.maxAutoFixIterations}\n\n**MUST** output checkpoint after fix attempt:\n${checkpointMessage}\n\n⛔ BLOCK: 未輸出 iteration checkpoint 禁止進入下一迭代`,
+    systemMessage: [
+      `[Auto-Fix Loop] 🔄 Iteration ${newState.iteration}/${CONFIG.maxAutoFixIterations}`,
+      `Error Classification: ${classification.type} (${classification.strategy})`,
+      '',
+      '### MANDATORY Fix Steps',
+      mandatorySteps,
+      '',
+      `**MUST** output checkpoint after fix attempt:`,
+      checkpointMessage,
+      '',
+      '⛔ 未輸出 iteration checkpoint 禁止進入下一迭代'
+    ].join('\n'),
     autoFixPlan: plan,
+    errorClassification: classification,
     stateUpdate: newState
   };
 }
@@ -333,4 +413,14 @@ function main() {
   console.log(JSON.stringify(output, null, 2));
 }
 
-main();
+module.exports = {
+  classifyError,
+  shouldAutoFix,
+  generateAutoFixPlan,
+  handleFailure,
+  handleSuccess
+};
+
+if (require.main === module) {
+  main();
+}

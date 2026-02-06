@@ -102,6 +102,12 @@ const TASK_PATTERNS = {
   }
 };
 
+// 並行限制（與 agent-router.js CONCURRENCY_LIMITS 保持一致）
+const MAX_CONCURRENT_PER_TYPE = {
+  architect: 1, developer: 2, tester: 1, reviewer: 1, explorer: 3
+};
+const MAX_PARALLEL_AGENTS = 4;
+
 /**
  * 識別任務模式（計分制 — 避免 first-match 優先級問題）
  */
@@ -302,6 +308,48 @@ function decomposeByDependency(prompt, requiredAgents, mentionedFiles) {
 }
 
 /**
+ * 按內容類型分解（用於文檔更新任務）
+ */
+function decomposeByContentType(prompt, requiredAgents, mentionedFiles) {
+  const subtasks = [];
+  let taskId = 1;
+
+  const contentTypes = [];
+  if (/readme|說明|介紹/i.test(prompt)) contentTypes.push('readme');
+  if (/api|介面|接口/i.test(prompt)) contentTypes.push('api-doc');
+  if (/註解|comment|jsdoc/i.test(prompt)) contentTypes.push('inline-comment');
+  if (/教學|tutorial|guide|指南/i.test(prompt)) contentTypes.push('guide');
+  if (/changelog|更新日誌/i.test(prompt)) contentTypes.push('changelog');
+  if (contentTypes.length === 0) contentTypes.push('general-doc');
+
+  for (const ct of contentTypes) {
+    subtasks.push({
+      id: `task-${taskId++}`,
+      agent: 'developer',
+      description: generateTaskDescription('developer', `更新 ${ct}：${prompt}`),
+      inputs: [prompt, ...mentionedFiles],
+      outputs: [`${ct} 文檔更新`],
+      depends_on: [],
+      estimated_complexity: 'simple'
+    });
+  }
+
+  if (contentTypes.length > 1 && requiredAgents.includes('reviewer')) {
+    subtasks.push({
+      id: `task-${taskId}`,
+      agent: 'reviewer',
+      description: '審查所有文檔變更的一致性',
+      inputs: contentTypes.map(ct => `${ct} 文檔更新`),
+      outputs: ['文檔審查報告'],
+      depends_on: subtasks.map(t => t.id),
+      estimated_complexity: 'simple'
+    });
+  }
+
+  return subtasks;
+}
+
+/**
  * 生成任務描述（含原始請求上下文摘要）
  */
 function generateTaskDescription(agent, prompt) {
@@ -370,15 +418,23 @@ function generateParallelGroups(subtasks) {
 
   while (completed.size < subtasks.length) {
     const currentGroup = [];
+    const agentCount = {};
 
     for (const task of subtasks) {
       if (completed.has(task.id)) continue;
 
       // 檢查依賴是否都已完成
       const depsCompleted = task.depends_on.every(dep => completed.has(dep));
-      if (depsCompleted) {
-        currentGroup.push(task.id);
-      }
+      if (!depsCompleted) continue;
+
+      // 並行限制檢查
+      const agent = task.agent || 'developer';
+      const count = agentCount[agent] || 0;
+      if (count >= (MAX_CONCURRENT_PER_TYPE[agent] || 2)) continue;
+      if (currentGroup.length >= MAX_PARALLEL_AGENTS) break;
+
+      currentGroup.push(task.id);
+      agentCount[agent] = count + 1;
     }
 
     if (currentGroup.length === 0) {
@@ -418,6 +474,9 @@ function decomposeTask(prompt, classificationResult = null) {
       break;
     case 'byDependency':
       subtasks = decomposeByDependency(prompt, requiredAgents, mentionedFiles);
+      break;
+    case 'byContentType':
+      subtasks = decomposeByContentType(prompt, requiredAgents, mentionedFiles);
       break;
     case 'none':
       // 不需要分解，直接派給單一 agent
@@ -510,7 +569,10 @@ function generateTaskCommands(decomposition) {
   for (const group of execution_order.parallel_groups) {
     const groupCommands = group.map(taskId => {
       const task = subtasks.find(t => t.id === taskId);
-      if (!task) return null;
+      if (!task) {
+        console.error(`[Task Decomposition] Warning: taskId "${taskId}" not found in subtasks`);
+        return null;
+      }
 
       const agentType = `vibe-engine-core:${task.agent}`;
       return {
@@ -634,10 +696,13 @@ Plan saved to: ${saveResult.filePath || 'memory'}`;
 module.exports = {
   decomposeTask,
   generateTaskCommands,
+  generateParallelGroups,
   saveDecomposition,
   identifyTaskPattern,
   AGENTS,
-  TASK_PATTERNS
+  TASK_PATTERNS,
+  MAX_CONCURRENT_PER_TYPE,
+  MAX_PARALLEL_AGENTS
 };
 
 // 執行主函數
