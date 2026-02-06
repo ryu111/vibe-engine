@@ -19,6 +19,8 @@ const { MemoryStore } = require('./lib/memory-store');
 const { MEMORY_TYPES, MEMORY_SOURCES } = require('./lib/memory-item');
 const { INITIAL_CONFIDENCE } = require('./lib/confidence');
 const { TaskState } = require('./lib/task-state');
+const { InstinctManager } = require('./lib/instinct-manager');
+const { analyzePatterns, generateInstincts } = require('./lib/pattern-analyzer');
 
 /**
  * 獲取觀察統計
@@ -258,6 +260,26 @@ async function main() {
       // 執行信心衰減
       const decay = store.runDecay();
 
+      // 模式偵測 + Instinct 生成
+      let instinctResult = null;
+      if (stats.count >= 10 || stats.corrections > 0) {
+        try {
+          const patterns = analyzePatterns(observations);
+          if (patterns.length > 0) {
+            const im = new InstinctManager(paths.instincts);
+            instinctResult = generateInstincts(patterns, im);
+          }
+        } catch (e) {
+          // 模式偵測失敗不阻塞記憶固化
+        }
+      }
+
+      // 記憶數超過閾值時，建議觸發 memory-curator
+      const memoryStats = store.getStats();
+      if (memoryStats.total >= 50) {
+        messageParts.push('Consider running memory-curator (50+ memories)');
+      }
+
       // 清理舊觀察
       cleanupObservations(paths.observations, 100);
 
@@ -282,6 +304,10 @@ async function main() {
         messageParts.push(`${decay.decayed} decayed`);
       }
 
+      if (instinctResult && (instinctResult.created > 0 || instinctResult.updated > 0)) {
+        messageParts.push(`Instincts: ${instinctResult.created} new, ${instinctResult.updated} reinforced`);
+      }
+
       // 獲取最新統計
       const finalStats = store.getStats();
       messageParts.push(`(total: ${finalStats.total} memories)`);
@@ -303,4 +329,14 @@ async function main() {
   }
 }
 
-main().catch(console.error);
+module.exports = {
+  analyzeObservations,
+  consolidateMemories,
+  inferTaskState,
+  getObservationStats,
+  cleanupObservations
+};
+
+if (require.main === module) {
+  main().catch(console.error);
+}

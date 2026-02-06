@@ -283,6 +283,60 @@ class InstinctManager {
   }
 
   /**
+   * 執行聚類演化 — 生成演化產物
+   *
+   * @param {object} cluster - findClusters() 的結果項
+   * @returns {object} - { success, type, name, filePath, error }
+   */
+  evolve(cluster) {
+    const evolvedDir = path.join(path.dirname(this.instinctsDir), 'evolved');
+    const type = cluster.suggestedType || EVOLUTION_TYPES.COMMAND;
+    const name = `${cluster.domain}-${type}-${Date.now()}`;
+
+    // 按類型建立子目錄
+    const typeDir = path.join(evolvedDir, `${type}s`);
+    if (!fs.existsSync(typeDir)) {
+      fs.mkdirSync(typeDir, { recursive: true });
+    }
+
+    // 收集 instinct 內容
+    const instinctSummary = cluster.instincts.map(i =>
+      `- ${i.trigger}: ${i.action} (confidence: ${i.confidence})`
+    ).join('\n');
+
+    const instinctIds = cluster.instincts.map(i => i.id);
+
+    // 生成演化產物
+    const content = [
+      '---',
+      `name: ${name}`,
+      `type: ${type}`,
+      `domain: ${cluster.domain}`,
+      `evolved_from: [${instinctIds.join(', ')}]`,
+      `evolved_at: "${now()}"`,
+      `confidence: ${cluster.avgConfidence.toFixed(2)}`,
+      '---',
+      '',
+      `# ${cluster.domain} ${type}`,
+      '',
+      `> Evolved from ${cluster.count} instincts (avg confidence: ${cluster.avgConfidence.toFixed(2)})`,
+      '',
+      '## Source Instincts',
+      instinctSummary,
+      ''
+    ].join('\n');
+
+    const filePath = path.join(typeDir, `${name}.md`);
+
+    try {
+      fs.writeFileSync(filePath, content);
+      return { success: true, type, name, filePath };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  /**
    * 獲取統計資訊
    */
   getStats() {

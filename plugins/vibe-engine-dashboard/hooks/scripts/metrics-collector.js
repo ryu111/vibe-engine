@@ -126,9 +126,13 @@ async function main() {
   }
 }
 
-main().catch(() => {
-  console.log(JSON.stringify({
-    continue: true,
-    suppressOutput: true
-  }));
-});
+if (require.main === module) {
+  main().catch(() => {
+    console.log(JSON.stringify({
+      continue: true,
+      suppressOutput: true
+    }));
+  });
+}
+
+module.exports = { parseToolResult, summarizeInput, main };

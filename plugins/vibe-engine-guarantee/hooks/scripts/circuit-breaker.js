@@ -270,4 +270,12 @@ function main() {
   }
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  loadState, saveState, checkCircuit,
+  recordFailure, recordSuccess, resetCircuit, getStatus,
+  CONFIG, DEFAULT_STATE, main
+};

@@ -273,9 +273,17 @@ async function main() {
   }
 }
 
-main().catch(() => {
-  console.log(JSON.stringify({
-    continue: true,
-    suppressOutput: true
-  }));
-});
+if (require.main === module) {
+  main().catch(() => {
+    console.log(JSON.stringify({
+      continue: true,
+      suppressOutput: true
+    }));
+  });
+}
+
+module.exports = {
+  determineOutcome, detectUserCorrection,
+  summarizeResult, summarizeInput, getRecentObservations,
+  EXCLUDED_TOOLS, ERROR_INDICATORS, main
+};

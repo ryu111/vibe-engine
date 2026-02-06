@@ -34,74 +34,91 @@ const SENSITIVE_FILES = [
   /password/i
 ];
 
-// 讀取 stdin（hook input）
-let input = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (chunk) => { input += chunk; });
+/**
+ * 評估權限 — 核心邏輯
+ *
+ * @param {object} hookInput - Hook 輸入 { tool_name, tool_input }
+ * @returns {object} - { decision, reason, warnings, output }
+ */
+function evaluatePermission(hookInput) {
+  const toolName = hookInput.tool_name || '';
+  const toolInput = hookInput.tool_input || {};
 
-process.stdin.on('end', () => {
+  let decision = 'allow';
+  let reason = '';
+  let warnings = [];
+
+  // 檢查 Bash 命令
+  if (toolName === 'Bash') {
+    const command = toolInput.command || '';
+
+    for (const pattern of DANGEROUS_PATTERNS) {
+      if (pattern.test(command)) {
+        decision = 'deny';
+        reason = `Dangerous command detected: matches pattern ${pattern}`;
+        break;
+      }
+    }
+
+    // 警告但不阻止
+    if (decision === 'allow' && command.includes('sudo')) {
+      warnings.push('Command uses sudo - ensure this is intended');
+    }
+  }
+
+  // 檢查檔案操作
+  if (toolName === 'Write' || toolName === 'Edit') {
+    const filePath = toolInput.file_path || '';
+
+    for (const pattern of SENSITIVE_FILES) {
+      if (pattern.test(filePath)) {
+        decision = 'ask';  // 需要確認
+        reason = `Sensitive file detected: ${filePath}`;
+        break;
+      }
+    }
+  }
+
+  // 構建輸出
+  const output = {
+    continue: decision !== 'deny',
+    suppressOutput: false,
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: decision,
+      permissionDecisionReason: reason
+    }
+  };
+
+  if (decision === 'deny') {
+    output.systemMessage = `⛔ BLOCK: ${reason}. This operation is FORBIDDEN and has been blocked. MUST NOT attempt to bypass this security check.`;
+  } else if (decision === 'ask') {
+    output.systemMessage = `⛔ CRITICAL: ${reason}. MUST get explicit user approval before proceeding. Do NOT modify sensitive files without confirmation.`;
+  } else if (warnings.length > 0) {
+    output.systemMessage = `[Permission Guard] ⚠️ Warnings: ${warnings.join('; ')}`;
+  }
+
+  return { decision, reason, warnings, output };
+}
+
+/**
+ * 主函數
+ */
+async function main() {
+  let input = '';
+
+  if (!process.stdin.isTTY) {
+    process.stdin.setEncoding('utf8');
+    await new Promise((resolve) => {
+      process.stdin.on('data', (chunk) => { input += chunk; });
+      process.stdin.on('end', resolve);
+    });
+  }
+
   try {
     const hookInput = JSON.parse(input);
-    const toolName = hookInput.tool_name || '';
-    const toolInput = hookInput.tool_input || {};
-
-    let decision = 'allow';
-    let reason = '';
-    let warnings = [];
-
-    // 檢查 Bash 命令
-    if (toolName === 'Bash') {
-      const command = toolInput.command || '';
-
-      for (const pattern of DANGEROUS_PATTERNS) {
-        if (pattern.test(command)) {
-          decision = 'deny';
-          reason = `Dangerous command detected: matches pattern ${pattern}`;
-          break;
-        }
-      }
-
-      // 警告但不阻止
-      if (decision === 'allow' && command.includes('sudo')) {
-        warnings.push('Command uses sudo - ensure this is intended');
-      }
-    }
-
-    // 檢查檔案操作
-    if (toolName === 'Write' || toolName === 'Edit') {
-      const filePath = toolInput.file_path || '';
-
-      for (const pattern of SENSITIVE_FILES) {
-        if (pattern.test(filePath)) {
-          decision = 'ask';  // 需要確認
-          reason = `Sensitive file detected: ${filePath}`;
-          break;
-        }
-      }
-    }
-
-    // 輸出決定（PreToolUse hook 格式）
-    const output = {
-      continue: decision !== 'deny',  // deny 時阻止，ask 時繼續但顯示訊息
-      suppressOutput: false,
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        permissionDecision: decision,
-        permissionDecisionReason: reason
-      }
-    };
-
-    // 使用 Forced Eval Pattern 強制語言
-    if (decision === 'deny') {
-      output.systemMessage = `⛔ BLOCK: ${reason}. This operation is FORBIDDEN and has been blocked. MUST NOT attempt to bypass this security check.`;
-    } else if (decision === 'ask') {
-      output.systemMessage = `⛔ CRITICAL: ${reason}. MUST get explicit user approval before proceeding. Do NOT modify sensitive files without confirmation.`;
-    } else if (warnings.length > 0) {
-      output.systemMessage = `[Permission Guard] ⚠️ Warnings: ${warnings.join('; ')}`;
-    }
-
+    const { output } = evaluatePermission(hookInput);
     console.log(JSON.stringify(output));
-
   } catch (error) {
     console.log(JSON.stringify({
       systemMessage: `Permission check skipped: ${error.message}`,
@@ -114,9 +131,22 @@ process.stdin.on('end', () => {
       }
     }));
   }
-});
+}
 
-// TODO: 實作完整權限檢查
-// - 根據自主等級調整嚴格程度
-// - 整合預算檢查
-// - 支援自定義規則
+if (require.main === module) {
+  main().catch((error) => {
+    console.log(JSON.stringify({
+      continue: true,
+      suppressOutput: false,
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+        permissionDecisionReason: error.message
+      }
+    }));
+  });
+}
+
+module.exports = {
+  evaluatePermission, DANGEROUS_PATTERNS, SENSITIVE_FILES, main
+};

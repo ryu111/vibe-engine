@@ -14,6 +14,13 @@
  * I. 分類器準確性回歸測試（路徑消除、Segmenter 詞數、複合需求、分類結果）
  * J. 缺口修復驗證（計分制模式識別、中文直接回答、完成聚合器、複合需求整合）
  * K. 100% 完成度驗證（byContentType、maxConcurrent、getExecutableTasks、classifyError、診斷指令）
+ * L. P2 記憶學習（模式偵測、Instinct 生成、去重、領域推斷）
+ * M. Checkpoint CRUD 操作（create、verify、list、clear、delete、formatForDisplay）
+ * N. Instinct Evolution（findClusters、evolve、getReadyForEvolve、_suggestEvolutionType、getStats）
+ * O. Dashboard/Metrics 渲染（renderDashboard、renderMetrics、MetricsStore、drawProgressBar）
+ * P. 跨鏈狀態一致性（routing-state → completion-check/verification-engine、auto-fix state、budget）
+ * Q. 跨 Plugin 進程管道（observation-collector、metrics-collector、circuit-breaker、permission-guard）
+ * R. 完整生命週期模擬（UserPromptSubmit → PostToolUse → Stop → memory-consolidation）
  */
 
 const path = require('path');
@@ -56,6 +63,69 @@ let classifyError;
 try {
   ({ classifyError } = require(path.join(__dirname, '../../../../vibe-engine-guarantee/hooks/scripts/error-handler')));
 } catch { classifyError = null; }
+
+// pattern-analyzer（跨 plugin import — memory plugin）
+let analyzePatterns, detectCorrections, detectRepetitions, detectErrorFixes,
+    generateInstincts, inferDomain, calculateTriggerSimilarity, PATTERN_TYPES;
+try {
+  ({
+    analyzePatterns, detectCorrections, detectRepetitions, detectErrorFixes,
+    generateInstincts, inferDomain, calculateTriggerSimilarity, PATTERN_TYPES
+  } = require(path.join(__dirname, '../../../../vibe-engine-memory/hooks/scripts/lib/pattern-analyzer')));
+} catch { analyzePatterns = null; }
+
+// instinct-manager（跨 plugin import — memory plugin）
+let InstinctManager, DOMAINS, EVOLUTION_TYPES;
+try {
+  ({ InstinctManager, DOMAINS, EVOLUTION_TYPES } = require(path.join(__dirname, '../../../../vibe-engine-memory/hooks/scripts/lib/instinct-manager')));
+} catch { InstinctManager = null; }
+
+// checkpoint-manager（跨 plugin import — memory plugin）
+let CheckpointManager;
+try {
+  ({ CheckpointManager } = require(path.join(__dirname, '../../../../vibe-engine-memory/hooks/scripts/lib/checkpoint-manager')));
+} catch { CheckpointManager = null; }
+
+// renderer + metrics-store（跨 plugin import — dashboard plugin）
+let renderDashboard, renderMetrics, drawProgressBar, formatDuration;
+try {
+  ({ renderDashboard, renderMetrics, drawProgressBar, formatDuration } = require(path.join(__dirname, '../../../../vibe-engine-dashboard/hooks/scripts/lib/renderer')));
+} catch { renderDashboard = null; }
+
+let MetricsStore;
+try {
+  ({ MetricsStore } = require(path.join(__dirname, '../../../../vibe-engine-dashboard/hooks/scripts/lib/metrics-store')));
+} catch { MetricsStore = null; }
+
+// circuit-breaker（跨 plugin import — guarantee plugin）
+let cbCheckCircuit, cbRecordFailure, cbRecordSuccess, cbResetCircuit, cbGetStatus, CB_CONFIG;
+try {
+  ({ checkCircuit: cbCheckCircuit, recordFailure: cbRecordFailure,
+     recordSuccess: cbRecordSuccess, resetCircuit: cbResetCircuit,
+     getStatus: cbGetStatus, CONFIG: CB_CONFIG
+  } = require(path.join(__dirname, '../../../../vibe-engine-guarantee/hooks/scripts/circuit-breaker')));
+} catch { cbCheckCircuit = null; }
+
+// observation-collector（跨 plugin import — memory plugin）
+let determineOutcome, detectUserCorrection, obsSummarizeResult, OBS_EXCLUDED_TOOLS;
+try {
+  ({ determineOutcome, detectUserCorrection, summarizeResult: obsSummarizeResult,
+     EXCLUDED_TOOLS: OBS_EXCLUDED_TOOLS
+  } = require(path.join(__dirname, '../../../../vibe-engine-memory/hooks/scripts/observation-collector')));
+} catch { determineOutcome = null; }
+
+// metrics-collector（跨 plugin import — dashboard plugin）
+let mcParseToolResult, mcSummarizeInput;
+try {
+  ({ parseToolResult: mcParseToolResult, summarizeInput: mcSummarizeInput
+  } = require(path.join(__dirname, '../../../../vibe-engine-dashboard/hooks/scripts/metrics-collector')));
+} catch { mcParseToolResult = null; }
+
+// permission-guard（core plugin — 重構後可 import）
+let evaluatePermission;
+try {
+  ({ evaluatePermission } = require(path.join(SCRIPTS_DIR, 'permission-guard')));
+} catch { evaluatePermission = null; }
 
 // 測試上下文
 const testContext = {
@@ -811,6 +881,54 @@ function runHookScript(scriptName, stdinData, env = {}) {
   return null;
 }
 
+// 跨 Plugin 腳本路徑
+const PLUGIN_SCRIPTS = {
+  core: SCRIPTS_DIR,
+  guarantee: path.join(__dirname, '../../../../vibe-engine-guarantee/hooks/scripts'),
+  memory: path.join(__dirname, '../../../../vibe-engine-memory/hooks/scripts'),
+  dashboard: path.join(__dirname, '../../../../vibe-engine-dashboard/hooks/scripts')
+};
+
+function runPluginHookScript(plugin, scriptName, stdinData, env = {}) {
+  const scriptPath = path.join(PLUGIN_SCRIPTS[plugin], scriptName);
+  if (!fs.existsSync(scriptPath)) return null;
+  try {
+    const result = execSync(`node "${scriptPath}"`, {
+      input: JSON.stringify(stdinData),
+      encoding: 'utf8',
+      env: { ...process.env, ...env },
+      timeout: 15000,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    const lines = result.trim().split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try { return JSON.parse(lines[i]); } catch { continue; }
+    }
+  } catch (e) { /* process error */ }
+  return null;
+}
+
+function runCBProcess(flags, cwd) {
+  const scriptPath = path.join(PLUGIN_SCRIPTS.guarantee, 'circuit-breaker.js');
+  if (!fs.existsSync(scriptPath)) return null;
+  try {
+    const result = execSync(`node "${scriptPath}" ${flags}`, {
+      encoding: 'utf8',
+      cwd,
+      timeout: 15000,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    // 先嘗試整體解析（處理 pretty-printed JSON）
+    try { return JSON.parse(result.trim()); } catch { /* fallback */ }
+    // fallback: 逐行解析（向後兼容單行 JSON）
+    const lines = result.trim().split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try { return JSON.parse(lines[i]); } catch { continue; }
+    }
+  } catch (e) { /* process error */ }
+  return null;
+}
+
 async function testHookChainPipeline() {
   console.log('\n═══════════════════════════════════════');
   console.log('場景 H: Hook Chain 管道整合測試');
@@ -1483,6 +1601,848 @@ async function testHundredPercentCompletion() {
 }
 
 // ============================================================
+// 場景 L：P2 記憶學習 — 模式偵測 + Instinct 生成
+// ============================================================
+async function testMemoryLearning() {
+  console.log('\n📋 場景 L: P2 記憶學習 — 模式偵測 + Instinct 生成');
+
+  // 跳過如果模組不可用
+  if (!analyzePatterns || !InstinctManager) {
+    console.log('  ⚠️ pattern-analyzer 或 instinct-manager 不可用，跳過場景 L');
+    return;
+  }
+
+  // Mock 觀察數據
+  const mockObservations = [
+    // 正常操作
+    { timestamp: '2026-02-06T14:00:00Z', tool_name: 'Read', tool_input: { file_path: '/src/app.ts' }, outcome: 'success', user_correction: false },
+    // 用戶糾正
+    { timestamp: '2026-02-06T14:00:30Z', tool_name: 'Edit', tool_input: { file_path: '/src/app.ts' }, outcome: 'success', user_correction: false },
+    { timestamp: '2026-02-06T14:00:35Z', tool_name: 'Edit', tool_input: { file_path: '/src/app.ts' }, outcome: 'success', user_correction: true, corrects_previous: '2026-02-06T14:00:30Z' },
+    // 重複操作 (3+)
+    { timestamp: '2026-02-06T14:01:00Z', tool_name: 'Grep', tool_input: { pattern: 'TODO', path: '/src' }, outcome: 'success', user_correction: false },
+    { timestamp: '2026-02-06T14:01:10Z', tool_name: 'Grep', tool_input: { pattern: 'TODO', path: '/src' }, outcome: 'success', user_correction: false },
+    { timestamp: '2026-02-06T14:01:20Z', tool_name: 'Grep', tool_input: { pattern: 'TODO', path: '/src' }, outcome: 'success', user_correction: false },
+    // 錯誤→修復
+    { timestamp: '2026-02-06T14:02:00Z', tool_name: 'Bash', tool_input: { command: 'npm test' }, outcome: 'failure', user_correction: false },
+    { timestamp: '2026-02-06T14:02:30Z', tool_name: 'Bash', tool_input: { command: 'npm test' }, outcome: 'success', user_correction: false },
+  ];
+
+  // --- L1: detectCorrections ---
+  console.log('  L1: detectCorrections — 偵測用戶糾正模式');
+  const corrections = detectCorrections(mockObservations);
+  assert(
+    'L1.1', '偵測到 1 個糾正模式',
+    corrections.length === 1
+  );
+  assert(
+    'L1.2', '糾正模式類型為 CORRECTION',
+    corrections[0].type === PATTERN_TYPES.CORRECTION
+  );
+  assert(
+    'L1.3', '糾正模式信心為 0.4',
+    corrections[0].confidence === 0.4
+  );
+
+  // --- L2: detectRepetitions ---
+  console.log('  L2: detectRepetitions — 偵測重複操作模式');
+  const repetitions = detectRepetitions(mockObservations);
+  assert(
+    'L2.1', '偵測到至少 1 個重複模式（Grep 3 次）',
+    repetitions.length >= 1
+  );
+  const grepPattern = repetitions.find(p => p.action.includes('Grep'));
+  assert(
+    'L2.2', '重複模式信心為 0.3 + 3*0.05 = 0.45',
+    grepPattern && grepPattern.confidence === 0.45
+  );
+
+  // --- L3: detectErrorFixes ---
+  console.log('  L3: detectErrorFixes — 偵測錯誤修復模式');
+  const errorFixes = detectErrorFixes(mockObservations);
+  assert(
+    'L3.1', '偵測到 1 個錯誤修復模式（Bash failure→success）',
+    errorFixes.length === 1
+  );
+  assert(
+    'L3.2', '錯誤修復信心為 0.5',
+    errorFixes[0].confidence === 0.5
+  );
+
+  // --- L4: inferDomain ---
+  console.log('  L4: inferDomain — 領域推斷');
+  assert(
+    'L4.1', 'test 檔案 → TESTING',
+    inferDomain({ tool_input: { file_path: '/src/__tests__/app.test.ts' }, tool_name: 'Edit' }) === DOMAINS.TESTING
+  );
+  assert(
+    'L4.2', '.md 檔案 → DOCUMENTATION',
+    inferDomain({ tool_input: { file_path: '/docs/README.md' }, tool_name: 'Edit' }) === DOMAINS.DOCUMENTATION
+  );
+  assert(
+    'L4.3', 'Bash lint → CODE_STYLE',
+    inferDomain({ tool_input: { command: 'npx eslint src/' }, tool_name: 'Bash' }) === DOMAINS.CODE_STYLE
+  );
+
+  // --- L5: generateInstincts（用臨時目錄）---
+  console.log('  L5: generateInstincts — Instinct 生成與去重');
+  const tmpDir = path.join(require('os').tmpdir(), `vibe-test-instincts-${Date.now()}`);
+  fs.mkdirSync(tmpDir, { recursive: true });
+  try {
+    const im = new InstinctManager(tmpDir);
+    const patterns = analyzePatterns(mockObservations);
+
+    assert(
+      'L5.1', 'analyzePatterns 偵測到 3+ 模式（correction + repetition + error_fix）',
+      patterns.length >= 3
+    );
+
+    const result = generateInstincts(patterns, im);
+    assert(
+      'L5.2', '成功創建 instincts（created > 0）',
+      result.created > 0
+    );
+
+    // 第二次調用相同 patterns — 應該 update 而非 create
+    const result2 = generateInstincts(patterns, im);
+    assert(
+      'L5.3', '重複 patterns 被去重（updated > 0, created === 0）',
+      result2.updated > 0 && result2.created === 0
+    );
+  } finally {
+    // 清理
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+
+  // --- L6: calculateTriggerSimilarity ---
+  console.log('  L6: calculateTriggerSimilarity — 觸發語相似度');
+  assert(
+    'L6.1', '相同觸發語相似度為 1.0',
+    calculateTriggerSimilarity('when using Edit on app.ts', 'when using Edit on app.ts') === 1.0
+  );
+  assert(
+    'L6.2', '不同觸發語相似度 < 0.5',
+    calculateTriggerSimilarity('when using Edit on app.ts', 'fix the build error') < 0.5
+  );
+
+  // --- L7: analyzePatterns 邊界 ---
+  console.log('  L7: analyzePatterns — 邊界條件');
+  assert(
+    'L7.1', '少於 3 觀察返回空陣列',
+    analyzePatterns([{ tool_name: 'Read' }]).length === 0
+  );
+
+  console.log('\n✅ 場景 L 完成');
+}
+
+// ============================================================
+// 場景 M: Checkpoint CRUD 操作
+// ============================================================
+async function testCheckpointCRUD() {
+  console.log('\n═══════════════════════════════════════');
+  console.log('場景 M: Checkpoint CRUD 操作');
+  console.log('═══════════════════════════════════════');
+
+  if (!CheckpointManager) {
+    console.log('⚠️ 跳過場景 M（CheckpointManager 未找到）');
+    return;
+  }
+
+  // 使用 tmp dir
+  const tmpDir = path.join(require('os').tmpdir(), `vibe-test-checkpoint-${Date.now()}`);
+  fs.mkdirSync(tmpDir, { recursive: true });
+  const manager = new CheckpointManager(tmpDir);
+
+  console.log('\n📋 M1: create → success');
+  const createResult = manager.create('test-cp', { description: 'Test checkpoint' });
+  assert('M1.1', 'create 成功', createResult.success === true);
+  assert('M1.2', 'checkpoint 包含 metrics', createResult.checkpoint && createResult.checkpoint.metrics != null);
+  assert('M1.3', 'metrics 包含 git_sha', typeof createResult.checkpoint.metrics.git_sha === 'string' || createResult.checkpoint.metrics.git_sha === null);
+
+  console.log('  M2: create duplicate → error');
+  const dupResult = manager.create('test-cp');
+  assert('M2.1', '重複創建返回 error', dupResult.success === false);
+
+  console.log('  M3: get → returns checkpoint');
+  const got = manager.get('test-cp');
+  assert('M3.1', 'get 返回 checkpoint', got !== null && got.name === 'test-cp');
+
+  console.log('  M4: list → returns array');
+  const list = manager.list();
+  assert('M4.1', 'list 返回非空陣列', Array.isArray(list) && list.length > 0);
+
+  console.log('  M5: verify → returns status + diff');
+  const verifyResult = manager.verify('test-cp');
+  assert('M5.1', 'verify 成功', verifyResult.success === true);
+  assert('M5.2', 'verify 包含 status', typeof verifyResult.status === 'string');
+  assert('M5.3', 'verify 包含 diff', verifyResult.diff != null);
+
+  console.log('  M6: delete → success');
+  const delResult = manager.delete('test-cp');
+  assert('M6.1', 'delete 成功', delResult.success === true);
+
+  console.log('  M7: clear + formatForDisplay');
+  // 建立幾個 checkpoint 再清理
+  manager.create('cp-a', { description: 'A' });
+  manager.create('cp-b', { description: 'B' });
+  const clearResult = manager.clear(1);
+  assert('M7.1', 'clear 返回 deleted/kept', typeof clearResult.deleted === 'number' && typeof clearResult.kept === 'number');
+
+  const remaining = manager.list();
+  const display = manager.formatForDisplay(remaining);
+  assert('M7.2', 'formatForDisplay 返回字串', typeof display === 'string');
+
+  // 清理
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+
+  console.log('\n✅ 場景 M 完成');
+}
+
+// ============================================================
+// 場景 N: Instinct Evolution
+// ============================================================
+async function testInstinctEvolution() {
+  console.log('\n═══════════════════════════════════════');
+  console.log('場景 N: Instinct Evolution');
+  console.log('═══════════════════════════════════════');
+
+  if (!InstinctManager || !DOMAINS || !EVOLUTION_TYPES) {
+    console.log('⚠️ 跳過場景 N（InstinctManager 未找到）');
+    return;
+  }
+
+  // 使用 tmp dir，建立 4 個同 domain instincts
+  const tmpDir = path.join(require('os').tmpdir(), `vibe-test-evolve-${Date.now()}`);
+  fs.mkdirSync(tmpDir, { recursive: true });
+  const manager = new InstinctManager(tmpDir);
+
+  // 建立 4 個 testing domain instincts（confidence >= 0.6）
+  for (let i = 0; i < 4; i++) {
+    manager.create({
+      trigger: `when running test suite part ${i}`,
+      action: `Check test coverage before committing (${i})`,
+      domain: DOMAINS.TESTING,
+      confidence: 0.7,
+      evidence: [{ date: '2026-02-06', description: `Evidence ${i}` }]
+    });
+  }
+
+  console.log('\n📋 N1: findClusters');
+  const clusters = manager.findClusters(3);
+  assert('N1.1', 'findClusters 找到聚類', clusters.length > 0);
+  assert('N1.2', '聚類 count >= 3', clusters[0].count >= 3);
+
+  console.log('  N2: suggestedType');
+  assert('N2.1', '聚類有 suggestedType', typeof clusters[0].suggestedType === 'string');
+
+  console.log('  N3: getReadyForEvolve');
+  const ready = manager.getReadyForEvolve(3);
+  assert('N3.1', 'getReadyForEvolve 返回高信心聚類', ready.length > 0);
+
+  console.log('  N4: evolve');
+  const evolveResult = manager.evolve(clusters[0]);
+  assert('N4.1', 'evolve 成功', evolveResult.success === true);
+  assert('N4.2', 'evolve 返回 type 和 name', evolveResult.type != null && evolveResult.name != null);
+  assert('N4.3', 'evolved 檔案存在', fs.existsSync(evolveResult.filePath));
+
+  console.log('  N5: getStats');
+  const stats = manager.getStats();
+  assert('N5.1', 'getStats 返回完整結構', stats.total === 4 && stats.byDomain != null && stats.byConfidence != null);
+  assert('N5.2', 'byDomain 包含 testing', stats.byDomain[DOMAINS.TESTING] === 4);
+
+  console.log('  N6: _suggestEvolutionType 邏輯');
+  // 模擬「negative」instincts → 應該建議 RULE
+  const negativeInstincts = [
+    { trigger: 'never use var in code', action: 'Use const', confidence: 0.7 },
+    { trigger: 'avoid any type', action: 'Use specific types', confidence: 0.7 },
+    { trigger: "don't skip tests", action: 'Always run tests', confidence: 0.7 }
+  ];
+  const negType = manager._suggestEvolutionType(negativeInstincts);
+  assert('N6.1', 'negative instincts → RULE', negType === EVOLUTION_TYPES.RULE);
+
+  // 清理
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+
+  console.log('\n✅ 場景 N 完成');
+}
+
+// ============================================================
+// 場景 O: Dashboard/Metrics 渲染
+// ============================================================
+async function testDashboardMetrics() {
+  console.log('\n═══════════════════════════════════════');
+  console.log('場景 O: Dashboard/Metrics 渲染');
+  console.log('═══════════════════════════════════════');
+
+  if (!renderDashboard || !renderMetrics || !MetricsStore) {
+    console.log('⚠️ 跳過場景 O（Dashboard/Metrics 模組未找到）');
+    return;
+  }
+
+  // Mock dashboard 數據
+  const mockData = {
+    version: '0.6.4',
+    autonomyLevel: 'L2',
+    currentTask: 'Implementing user auth',
+    progress: 65,
+    agents: [
+      { name: 'Architect', status: 'Done' },
+      { name: 'Developer', status: 'Work' }
+    ],
+    resources: {
+      tokens: { used: 45000, limit: 100000 },
+      cost: { used: 0.58, limit: 1.0 }
+    },
+    recentLogs: [
+      { timestamp: '2026-02-06T14:30:00Z', tool: 'Read', success: true, duration_ms: 45 }
+    ],
+    memoryCount: 12,
+    toolCount: 42,
+    contextPercent: 35,
+    systemOk: true
+  };
+
+  console.log('\n📋 O1: renderDashboard');
+  const dashboard = renderDashboard(mockData);
+  assert('O1.1', 'renderDashboard 包含標題', dashboard.includes('VIBE ENGINE DASHBOARD'));
+  assert('O1.2', 'renderDashboard 包含 agent 名稱', dashboard.includes('Architect'));
+  assert('O1.3', 'renderDashboard 包含 resources', dashboard.includes('Tokens'));
+
+  // Mock metrics stats
+  const mockStats = {
+    totalCalls: 42,
+    successCount: 40,
+    failureCount: 2,
+    successRate: 95,
+    byTool: {
+      Read: { count: 18, avgDuration: 45 },
+      Edit: { count: 8, avgDuration: 120 }
+    },
+    startTime: '2026-02-06T14:00:00Z',
+    endTime: '2026-02-06T14:32:00Z'
+  };
+
+  console.log('  O2: renderMetrics');
+  const metrics = renderMetrics(mockStats);
+  assert('O2.1', 'renderMetrics 包含標題', metrics.includes('Session Metrics'));
+  assert('O2.2', 'renderMetrics 包含 tool 統計', metrics.includes('Read') && metrics.includes('Edit'));
+  assert('O2.3', 'renderMetrics 包含成功率', metrics.includes('95%'));
+
+  console.log('  O3: MetricsStore 空狀態');
+  const tmpDir = path.join(require('os').tmpdir(), `vibe-test-metrics-${Date.now()}`);
+  fs.mkdirSync(tmpDir, { recursive: true });
+  const store = new MetricsStore(tmpDir);
+  const emptyStats = store.getStats();
+  assert('O3.1', '空 store totalCalls=0', emptyStats.totalCalls === 0);
+  assert('O3.2', '空 store successRate=0', emptyStats.successRate === 0);
+
+  console.log('  O4: MetricsStore record + getStats');
+  store.record({ tool: 'Read', success: true, duration_ms: 50 });
+  store.record({ tool: 'Edit', success: true, duration_ms: 120 });
+  store.record({ tool: 'Bash', success: false, duration_ms: 5000 });
+  const recordedStats = store.getStats();
+  assert('O4.1', 'totalCalls=3', recordedStats.totalCalls === 3);
+  assert('O4.2', 'successCount=2', recordedStats.successCount === 2);
+  assert('O4.3', 'byTool 有 Read', recordedStats.byTool.Read != null && recordedStats.byTool.Read.count === 1);
+
+  console.log('  O5: drawProgressBar + formatDuration');
+  const bar = drawProgressBar(50, 100, 10);
+  assert('O5.1', 'drawProgressBar 包含 50%', bar.includes('50%'));
+  const dur = formatDuration(65000);
+  assert('O5.2', 'formatDuration 65s → 1m', dur.includes('1m'));
+
+  // 清理
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+
+  console.log('\n✅ 場景 O 完成');
+}
+
+// ============================================================
+// 場景 P: 跨鏈狀態一致性（State Bridge）
+// ============================================================
+async function testCrossChainState() {
+  console.log('\n═══════════════════════════════════════');
+  console.log('場景 P: 跨鏈狀態一致性');
+  console.log('═══════════════════════════════════════\n');
+
+  const tempDir = path.join(__dirname, '.test-temp-p-' + Date.now());
+  const vibeDir = path.join(tempDir, '.vibe-engine');
+  fs.mkdirSync(path.join(vibeDir, 'tasks'), { recursive: true });
+
+  const hookEnv = {
+    CLAUDE_PROJECT_ROOT: tempDir,
+    CLAUDE_PLUGIN_ROOT: path.join(__dirname, '../..')
+  };
+  const originalRoot = process.env.CLAUDE_PROJECT_ROOT;
+  process.env.CLAUDE_PROJECT_ROOT = tempDir;
+
+  try {
+    const triggerPrompt = '幫我實作登入 API 和單元測試';
+
+    // ── P1-P3: UserPromptSubmit 管道寫入 routing-state ──
+    console.log('📋 P1-P3: UserPromptSubmit → routing-state.json');
+    const step1 = runHookScript('prompt-classifier.js', { user_prompt: triggerPrompt }, hookEnv);
+    const step2 = runHookScript('task-decomposition-engine.js', {
+      user_prompt: triggerPrompt,
+      hookSpecificOutput: step1.hookSpecificOutput
+    }, hookEnv);
+    const step3 = runHookScript('agent-router.js', {
+      user_prompt: triggerPrompt,
+      hookSpecificOutput: step2.hookSpecificOutput
+    }, hookEnv);
+
+    const routingStatePath = path.join(vibeDir, 'routing-state.json');
+    assert(
+      fs.existsSync(routingStatePath),
+      'P1 agent-router 寫入 routing-state.json',
+      `exists: ${fs.existsSync(routingStatePath)}`
+    );
+
+    const rsm = new RoutingStateManager(tempDir);
+    const state = rsm.load();
+    assert(
+      state && state.planId,
+      'P2 RoutingStateManager 讀取到 planId',
+      `planId: ${state?.planId}`
+    );
+
+    assert(
+      step3?.hookSpecificOutput?.isDirective === true,
+      'P3 agent-router 生成 isDirective 指令',
+      `isDirective: ${step3?.hookSpecificOutput?.isDirective}`
+    );
+
+    // ── P4-P5: 活躍 routing → Stop hooks defer/fast-path ──
+    console.log('\n📋 P4-P5: 活躍 routing → completion-check defers + verification fast-paths');
+    const ccResult = runHookScript('completion-check.js', {
+      transcript_summary: '執行了部分任務',
+      reason: 'stop'
+    }, hookEnv);
+    assert(
+      ccResult?.hookSpecificOutput?.completionCheck === 'deferred',
+      'P4 completion-check defers（活躍 routing）',
+      `completionCheck: ${ccResult?.hookSpecificOutput?.completionCheck}`
+    );
+
+    const veResult = runHookScript('verification-engine.js', {
+      transcript_summary: '正在執行路由任務中',
+      reason: 'stop'
+    }, hookEnv);
+    assert(
+      veResult?.continue === true,
+      'P5 verification-engine fast-path（活躍 routing）',
+      `continue: ${veResult?.continue}`
+    );
+
+    // ── P6: 清除 routing → completion-check 不再 defer ──
+    console.log('\n📋 P6: routing 完成 → completion-check aggregates');
+    fs.unlinkSync(routingStatePath);
+    const ccResult2 = runHookScript('completion-check.js', {
+      transcript_summary: '完成了所有任務',
+      reason: 'stop'
+    }, hookEnv);
+    assert(
+      ccResult2?.hookSpecificOutput?.completionCheck !== 'deferred',
+      'P6 completion-check aggregates（routing 已清除）',
+      `completionCheck: ${ccResult2?.hookSpecificOutput?.completionCheck}`
+    );
+
+    // ── P7: auto-fix 活躍 → completion-check defers ──
+    console.log('\n📋 P7-P8: auto-fix state → completion-check 行為');
+    const autoFixPath = path.join(vibeDir, 'auto-fix-state.json');
+    fs.writeFileSync(autoFixPath, JSON.stringify({
+      active: true, iteration: 2, maxIterations: 3
+    }));
+    const ccResult3 = runHookScript('completion-check.js', {
+      transcript_summary: '修復中',
+      reason: 'stop'
+    }, hookEnv);
+    assert(
+      ccResult3?.hookSpecificOutput?.completionCheck === 'deferred',
+      'P7 auto-fix active → completion-check defers',
+      `completionCheck: ${ccResult3?.hookSpecificOutput?.completionCheck}`
+    );
+
+    // ── P8: routing + auto-fix 同時活躍 ──
+    fs.writeFileSync(routingStatePath, JSON.stringify({
+      planId: 'test-plan-p8', status: 'in_progress',
+      phases: [{ tasks: [{ id: 't1', agent: 'developer', status: 'pending' }] }],
+      totalCount: 1, completedCount: 0
+    }));
+    const ccResult4 = runHookScript('completion-check.js', {
+      transcript_summary: '多重活躍狀態',
+      reason: 'stop'
+    }, hookEnv);
+    assert(
+      ccResult4?.hookSpecificOutput?.completionCheck === 'deferred',
+      'P8 routing + auto-fix 同時活躍 → deferred',
+      `completionCheck: ${ccResult4?.hookSpecificOutput?.completionCheck}`
+    );
+
+    // ── P9-P10: Budget 閾值邏輯 ──
+    console.log('\n📋 P9-P10: Budget 閾值邏輯');
+    const alert0 = getAlertLevel({ tokenUsage: 0.0, costUsage: 0.0 });
+    assert(
+      !alert0 || alert0.level !== 'exceeded',
+      'P9 budget 0% → 不超限',
+      `level: ${alert0?.level}`
+    );
+
+    const alert85 = getAlertLevel({ overall: 0.85, breakdown: { tokens: 0.85, cost: 0.85, operations: 0 } });
+    assert(
+      alert85 && (alert85.level === 'warning' || alert85.level === 'critical'),
+      'P10 budget 85% → warning 或 critical',
+      `level: ${alert85?.level}`
+    );
+
+  } finally {
+    process.env.CLAUDE_PROJECT_ROOT = originalRoot;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  console.log('\n✅ 場景 P 完成');
+}
+
+// ============================================================
+// 場景 Q: 跨 Plugin 進程管道（Cross-Plugin Pipeline）
+// ============================================================
+async function testCrossPluginPipeline() {
+  console.log('\n═══════════════════════════════════════');
+  console.log('場景 Q: 跨 Plugin 進程管道');
+  console.log('═══════════════════════════════════════\n');
+
+  const tempDir = path.join(__dirname, '.test-temp-q-' + Date.now());
+  const vibeDir = path.join(tempDir, '.vibe-engine');
+  fs.mkdirSync(path.join(vibeDir, 'memory'), { recursive: true });
+  fs.mkdirSync(path.join(vibeDir, 'metrics'), { recursive: true });
+  fs.mkdirSync(path.join(vibeDir, 'instincts'), { recursive: true });
+
+  const hookEnv = {
+    CLAUDE_PROJECT_ROOT: tempDir,
+    CLAUDE_PLUGIN_ROOT: path.join(__dirname, '../..')
+  };
+  const originalRoot = process.env.CLAUDE_PROJECT_ROOT;
+  process.env.CLAUDE_PROJECT_ROOT = tempDir;
+
+  try {
+    // ── Q1-Q3: observation-collector 函數測試 ──
+    console.log('📋 Q1-Q3: observation-collector 函數');
+    if (determineOutcome) {
+      assert(
+        determineOutcome({ tool_name: 'Edit', tool_result: 'File edited' }) === 'success',
+        'Q1 determineOutcome Edit 成功 → success',
+        `outcome: ${determineOutcome({ tool_name: 'Edit', tool_result: 'File edited' })}`
+      );
+
+      assert(
+        determineOutcome({ tool_name: 'Bash', tool_result: { error: 'command failed' } }) === 'failure',
+        'Q2 determineOutcome Bash 失敗 → failure',
+        `outcome: ${determineOutcome({ tool_name: 'Bash', tool_result: { error: 'command failed' } })}`
+      );
+
+      assert(
+        OBS_EXCLUDED_TOOLS && OBS_EXCLUDED_TOOLS.includes('TodoWrite'),
+        'Q3 EXCLUDED_TOOLS 包含 TodoWrite',
+        `includes: ${OBS_EXCLUDED_TOOLS?.includes('TodoWrite')}`
+      );
+    } else {
+      assert(false, 'Q1 observation-collector import 失敗', 'module not found');
+    }
+
+    // ── Q4: detectUserCorrection ──
+    console.log('\n📋 Q4: 用戶糾正偵測');
+    if (detectUserCorrection) {
+      const now = new Date().toISOString();
+      const oneSecAgo = new Date(Date.now() - 1000).toISOString();
+      const currentObs = { timestamp: now, tool_name: 'Edit', tool_input: { file_path: '/a.js' } };
+      const recentObs = [{ timestamp: oneSecAgo, tool_name: 'Edit', tool_input: { file_path: '/a.js' }, outcome: 'success' }];
+      assert(
+        detectUserCorrection(currentObs, recentObs) === true,
+        'Q4 同檔案短時間內多次 Edit → 糾正',
+        'detectUserCorrection returned true'
+      );
+    }
+
+    // ── Q5: observation-collector 進程測試 ──
+    console.log('\n📋 Q5-Q6: observation-collector 進程測試');
+    const obsResult = runPluginHookScript('memory', 'observation-collector.js', {
+      tool_name: 'Edit',
+      tool_input: { file_path: '/src/auth.js', new_string: 'code' },
+      tool_result: 'File edited successfully',
+      session_id: 'test-session-q'
+    }, hookEnv);
+    assert(
+      obsResult && obsResult.continue === true,
+      'Q5 observation-collector 進程執行成功',
+      `continue: ${obsResult?.continue}`
+    );
+
+    const obsFile = path.join(vibeDir, 'observations.jsonl');
+    assert(
+      fs.existsSync(obsFile),
+      'Q6 observations.jsonl 被創建',
+      `exists: ${fs.existsSync(obsFile)}`
+    );
+
+    // ── Q7-Q8: metrics-collector 函數測試 ──
+    console.log('\n📋 Q7-Q8: metrics-collector 函數');
+    if (mcParseToolResult) {
+      const metric = mcParseToolResult({
+        tool_name: 'Read',
+        tool_input: { file_path: '/a.js' },
+        tool_response: { content: 'file content', is_error: false, duration_ms: 45 }
+      });
+      assert(
+        metric && metric.tool === 'Read' && metric.success === true,
+        'Q7 parseToolResult 解析 Read 成功',
+        `tool: ${metric?.tool}, success: ${metric?.success}`
+      );
+
+      assert(
+        metric.duration_ms === 45,
+        'Q8 parseToolResult 保留 duration_ms',
+        `duration_ms: ${metric?.duration_ms}`
+      );
+    } else {
+      assert(false, 'Q7 metrics-collector import 失敗', 'module not found');
+    }
+
+    // ── Q9-Q11: permission-guard 函數測試 ──
+    console.log('\n📋 Q9-Q11: permission-guard 函數');
+    if (evaluatePermission) {
+      const denyResult = evaluatePermission({
+        tool_name: 'Bash', tool_input: { command: 'rm -rf /important/' }
+      });
+      assert(
+        denyResult.decision === 'deny',
+        'Q9 permission-guard 阻擋 rm -rf',
+        `decision: ${denyResult.decision}`
+      );
+
+      const allowResult = evaluatePermission({
+        tool_name: 'Bash', tool_input: { command: 'git status' }
+      });
+      assert(
+        allowResult.decision === 'allow',
+        'Q10 permission-guard 允許 git status',
+        `decision: ${allowResult.decision}`
+      );
+
+      const askResult = evaluatePermission({
+        tool_name: 'Edit', tool_input: { file_path: '/app/.env' }
+      });
+      assert(
+        askResult.decision === 'ask',
+        'Q11 permission-guard 警告 .env 檔案',
+        `decision: ${askResult.decision}`
+      );
+    } else {
+      assert(false, 'Q9 permission-guard import 失敗', 'module not found');
+    }
+
+    // ── Q12-Q14: circuit-breaker 進程測試 ──
+    console.log('\n📋 Q12-Q14: circuit-breaker 進程');
+    const cbStatus = runCBProcess('--status', tempDir);
+    assert(
+      cbStatus && cbStatus.state === 'CLOSED',
+      'Q12 circuit-breaker 初始 CLOSED',
+      `state: ${cbStatus?.state}`
+    );
+
+    // 記錄 5 次失敗 → 應觸發 OPEN
+    for (let i = 0; i < 5; i++) {
+      runCBProcess('--record-failure --error=test-fail', tempDir);
+    }
+    const cbStatus2 = runCBProcess('--status', tempDir);
+    assert(
+      cbStatus2 && cbStatus2.state === 'OPEN',
+      'Q13 circuit-breaker 5次失敗 → OPEN',
+      `state: ${cbStatus2?.state}, failures: ${cbStatus2?.failures}`
+    );
+
+    // 重置
+    const cbReset = runCBProcess('--reset', tempDir);
+    assert(
+      cbReset && cbReset.systemMessage && cbReset.systemMessage.includes('CLOSED'),
+      'Q14 circuit-breaker --reset → CLOSED',
+      `msg: ${cbReset?.systemMessage?.substring(0, 50)}`
+    );
+
+    // ── Q15: permission-guard 進程測試 ──
+    console.log('\n📋 Q15: permission-guard 進程');
+    const pgResult = runHookScript('permission-guard.js', {
+      tool_name: 'Bash',
+      tool_input: { command: 'git push --force' }
+    }, hookEnv);
+    assert(
+      pgResult && pgResult.continue === false,
+      'Q15 permission-guard 進程阻擋 git push --force',
+      `continue: ${pgResult?.continue}, decision: ${pgResult?.hookSpecificOutput?.permissionDecision}`
+    );
+
+  } finally {
+    process.env.CLAUDE_PROJECT_ROOT = originalRoot;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  console.log('\n✅ 場景 Q 完成');
+}
+
+// ============================================================
+// 場景 R: 完整生命週期模擬（Full Lifecycle）
+// ============================================================
+async function testFullLifecycle() {
+  console.log('\n═══════════════════════════════════════');
+  console.log('場景 R: 完整生命週期模擬');
+  console.log('═══════════════════════════════════════\n');
+
+  const tempDir = path.join(__dirname, '.test-temp-r-' + Date.now());
+  const vibeDir = path.join(tempDir, '.vibe-engine');
+  fs.mkdirSync(path.join(vibeDir, 'tasks'), { recursive: true });
+  fs.mkdirSync(path.join(vibeDir, 'memory'), { recursive: true });
+  fs.mkdirSync(path.join(vibeDir, 'metrics'), { recursive: true });
+  fs.mkdirSync(path.join(vibeDir, 'instincts'), { recursive: true });
+
+  const hookEnv = {
+    CLAUDE_PROJECT_ROOT: tempDir,
+    CLAUDE_PLUGIN_ROOT: path.join(__dirname, '../..')
+  };
+  const originalRoot = process.env.CLAUDE_PROJECT_ROOT;
+  process.env.CLAUDE_PROJECT_ROOT = tempDir;
+
+  try {
+    // ── R1-R3: UserPromptSubmit 完整管道 ──
+    console.log('📋 R1-R3: UserPromptSubmit 管道');
+    const prompt = '幫我建立用戶認證 API，要有登入、註冊和測試';
+    const s1 = runHookScript('prompt-classifier.js', { user_prompt: prompt }, hookEnv);
+    assert(
+      s1?.hookSpecificOutput?.needsDecomposition === true,
+      'R1 prompt-classifier → needsDecomposition',
+      `needsDecomposition: ${s1?.hookSpecificOutput?.needsDecomposition}`
+    );
+
+    const s2 = runHookScript('task-decomposition-engine.js', {
+      user_prompt: prompt, hookSpecificOutput: s1.hookSpecificOutput
+    }, hookEnv);
+    const subtasks = s2?.hookSpecificOutput?.decomposition?.task_decomposition?.subtasks;
+    assert(
+      subtasks && subtasks.length >= 3,
+      'R2 task-decomposition → 3+ subtasks',
+      `count: ${subtasks?.length}`
+    );
+
+    const s3 = runHookScript('agent-router.js', {
+      user_prompt: prompt, hookSpecificOutput: s2.hookSpecificOutput
+    }, hookEnv);
+    assert(
+      s3?.systemMessage && s3.systemMessage.includes('MANDATORY'),
+      'R3 agent-router → MANDATORY 指令',
+      `has MANDATORY: ${s3?.systemMessage?.includes('MANDATORY')}`
+    );
+
+    // ── R4-R5: 模擬 PostToolUse 觀察收集 ──
+    console.log('\n📋 R4-R5: PostToolUse 觀察收集');
+    // 寫入模擬觀察（直接用 JSONL 格式）
+    const obsFile = path.join(vibeDir, 'observations.jsonl');
+    const mockObs = [
+      { timestamp: new Date().toISOString(), session_id: 'r-test', tool_name: 'Edit', tool_input: { file_path: '/auth.js' }, tool_result_summary: 'edited', outcome: 'success', user_correction: false },
+      { timestamp: new Date().toISOString(), session_id: 'r-test', tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_result_summary: 'tests passed', outcome: 'success', user_correction: false },
+      { timestamp: new Date().toISOString(), session_id: 'r-test', tool_name: 'Edit', tool_input: { file_path: '/auth.test.js' }, tool_result_summary: 'edited', outcome: 'success', user_correction: false }
+    ];
+    fs.writeFileSync(obsFile, mockObs.map(o => JSON.stringify(o)).join('\n') + '\n');
+    assert(
+      fs.existsSync(obsFile),
+      'R4 觀察檔案已寫入',
+      `lines: ${mockObs.length}`
+    );
+
+    // 寫入模擬 metrics
+    const metricsDir = path.join(vibeDir, 'metrics');
+    const sessionFile = path.join(metricsDir, 'session.jsonl');
+    const mockMetrics = [
+      { timestamp: new Date().toISOString(), tool: 'Edit', success: true, duration_ms: 50 },
+      { timestamp: new Date().toISOString(), tool: 'Bash', success: true, duration_ms: 3000 }
+    ];
+    fs.writeFileSync(sessionFile, mockMetrics.map(m => JSON.stringify(m)).join('\n') + '\n');
+    assert(
+      fs.existsSync(sessionFile),
+      'R5 metrics 檔案已寫入',
+      `lines: ${mockMetrics.length}`
+    );
+
+    // ── R6-R7: Stop 鏈 — 活躍 routing ──
+    console.log('\n📋 R6-R7: Stop 鏈（活躍 routing）');
+    const ccStop1 = runHookScript('completion-check.js', {
+      transcript_summary: '執行了認證功能實作',
+      reason: 'stop'
+    }, hookEnv);
+    assert(
+      ccStop1?.hookSpecificOutput?.completionCheck === 'deferred',
+      'R6 Stop: completion-check defers（routing 活躍）',
+      `completionCheck: ${ccStop1?.hookSpecificOutput?.completionCheck}`
+    );
+
+    const veStop1 = runHookScript('verification-engine.js', {
+      transcript_summary: '正在執行認證功能實作',
+      reason: 'stop'
+    }, hookEnv);
+    assert(
+      veStop1?.continue === true,
+      'R7 Stop: verification-engine fast-path（routing 活躍）',
+      `continue: ${veStop1?.continue}`
+    );
+
+    // ── R8: 清除 routing → 正常 completion ──
+    console.log('\n📋 R8: routing 完成 → 正常 completion');
+    const routingStatePath = path.join(vibeDir, 'routing-state.json');
+    try { fs.unlinkSync(routingStatePath); } catch { /* ignore */ }
+    const autoFixPath = path.join(vibeDir, 'auto-fix-state.json');
+    try { fs.unlinkSync(autoFixPath); } catch { /* ignore */ }
+
+    const ccStop2 = runHookScript('completion-check.js', {
+      transcript_summary: '完成了用戶認證功能',
+      reason: 'stop'
+    }, hookEnv);
+    assert(
+      ccStop2?.hookSpecificOutput?.completionCheck !== 'deferred',
+      'R8 completion-check aggregates（routing 完成）',
+      `completionCheck: ${ccStop2?.hookSpecificOutput?.completionCheck}`
+    );
+
+    // ── R9: memory-consolidation 處理觀察 ──
+    console.log('\n📋 R9: memory-consolidation 處理觀察');
+    const mcResult = runPluginHookScript('memory', 'memory-consolidation.js', {
+      transcript_summary: '完成了用戶認證功能實作',
+      session_id: 'r-test',
+      completion_status: 'success'
+    }, hookEnv);
+    assert(
+      mcResult && mcResult.continue === true,
+      'R9 memory-consolidation 進程執行成功',
+      `continue: ${mcResult?.continue}`
+    );
+
+    // ── R10: 驗證 .vibe-engine/ 狀態檔完整性 ──
+    console.log('\n📋 R10: .vibe-engine/ 狀態檔完整性');
+    const expectedFiles = [
+      'observations.jsonl'
+    ];
+    const existingFiles = expectedFiles.filter(f => fs.existsSync(path.join(vibeDir, f)));
+    assert(
+      existingFiles.length >= 1,
+      'R10 .vibe-engine/ 包含預期狀態檔',
+      `found: ${existingFiles.join(', ')}`
+    );
+
+  } finally {
+    process.env.CLAUDE_PROJECT_ROOT = originalRoot;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  console.log('\n✅ 場景 R 完成');
+}
+
+// ============================================================
 // 主測試執行
 // ============================================================
 async function runAllTests() {
@@ -1503,6 +2463,13 @@ async function runAllTests() {
     await testClassifierAccuracy();       // 場景 I
     await testGapFixes();                  // 場景 J
     await testHundredPercentCompletion();  // 場景 K
+    await testMemoryLearning();            // 場景 L
+    await testCheckpointCRUD();            // 場景 M
+    await testInstinctEvolution();         // 場景 N
+    await testDashboardMetrics();          // 場景 O
+    await testCrossChainState();           // 場景 P
+    await testCrossPluginPipeline();       // 場景 Q
+    await testFullLifecycle();             // 場景 R
   } catch (error) {
     console.error('\n❌ 測試執行錯誤:', error.message);
     console.error(error.stack);
