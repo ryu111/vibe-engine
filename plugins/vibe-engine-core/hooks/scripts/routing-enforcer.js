@@ -132,6 +132,15 @@ function evaluateRouting(hookInput) {
     };
   }
 
+  // ★ EnterPlanMode 無條件阻擋 — Main Agent 永遠不該自行規劃
+  if (toolName === 'EnterPlanMode') {
+    return {
+      decision: 'deny',
+      reason: 'EnterPlanMode is unconditionally blocked for Main Agent (Router, Not Executor)',
+      unconditionalBlock: true
+    };
+  }
+
   // 檢查路由狀態
   const routingInfo = checkRoutingState();
 
@@ -156,10 +165,42 @@ function evaluateRouting(hookInput) {
 
 /**
  * 生成阻止訊息
- * @param {object} info - { delegateTo, planId, taskDescription }
+ * @param {object} info - { delegateTo, planId, taskDescription, unconditionalBlock }
  * @returns {string}
  */
 function buildDenyMessage(info) {
+  // 無條件阻擋 EnterPlanMode
+  if (info.unconditionalBlock) {
+    const lines = [
+      '',
+      '╔══════════════════════════════════════════════════════════════════╗',
+      '║  ⛔ EnterPlanMode 禁止 - Router, Not Executor                    ║',
+      '╠══════════════════════════════════════════════════════════════════╣',
+      '║  Main Agent 不應自行進入規劃模式                                 ║',
+      '║  架構規劃必須委派給 architect agent                               ║',
+      '╠══════════════════════════════════════════════════════════════════╣',
+      '║  MUST: 使用 Task tool 委派給 architect agent                     ║',
+      '╚══════════════════════════════════════════════════════════════════╝',
+      '',
+      '### 正確做法',
+      '',
+      '使用 Task tool 委派給 architect：',
+      '```',
+      'Task({',
+      '  subagent_type: "vibe-engine-core:architect",',
+      '  description: "設計架構方案",',
+      '  prompt: "分析需求並設計架構...",',
+      '  model: "sonnet"',
+      '})',
+      '```',
+      '',
+      '⛔ **EnterPlanMode 違反 Router, Not Executor 原則 — 規劃工作必須委派給 architect**',
+      ''
+    ];
+    return lines.join('\n');
+  }
+
+  // 原有的路由阻擋訊息
   const lines = [
     '',
     '╔══════════════════════════════════════════════════════════════════╗',
@@ -235,7 +276,8 @@ async function main() {
     delegateTo: result.delegateTo,
     planId: result.planId,
     taskId: result.taskId,
-    taskDescription: result.taskDescription
+    taskDescription: result.taskDescription,
+    unconditionalBlock: result.unconditionalBlock || false
   });
 
   writeHookOutput({

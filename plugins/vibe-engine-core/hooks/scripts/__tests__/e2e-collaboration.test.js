@@ -3754,19 +3754,24 @@ async function testDualLayerDefense() {
           `decision: ${planModeResult.decision}`
         );
         assert(
-          planModeResult.delegateTo === 'architect',
-          'W6.3 deny 訊息指向 architect agent',
-          `delegateTo: ${planModeResult.delegateTo}`
+          planModeResult.unconditionalBlock === true,
+          'W6.3 EnterPlanMode 是無條件阻擋',
+          `unconditionalBlock: ${planModeResult.unconditionalBlock}`
         );
 
-        // W6.4 沒有活躍路由時 EnterPlanMode 被 allow
+        // W6.4 沒有活躍路由時 EnterPlanMode 仍被 deny（無條件阻擋）
         const routingPath = path.join(tempDir, '.vibe-engine', 'routing-state.json');
         fs.writeFileSync(routingPath, JSON.stringify({ status: 'completed', phases: [] }));
         const planModeNoRoute = evalRouting({ tool_name: 'EnterPlanMode' });
         assert(
-          planModeNoRoute.decision === 'allow',
-          'W6.4 無活躍路由時 EnterPlanMode 被 allow',
+          planModeNoRoute.decision === 'deny',
+          'W6.4 無活躍路由時 EnterPlanMode 仍被 deny（無條件）',
           `decision: ${planModeNoRoute.decision}`
+        );
+        assert(
+          planModeNoRoute.unconditionalBlock === true,
+          'W6.4b 無條件阻擋標記存在',
+          `unconditionalBlock: ${planModeNoRoute.unconditionalBlock}`
         );
 
         // 恢復路由狀態供後續測試
@@ -3790,6 +3795,45 @@ async function testDualLayerDefense() {
           denyMsg.includes('EnterPlanMode'),
           'W6.5 deny 訊息包含 EnterPlanMode 關鍵字',
           `includes: ${denyMsg.includes('EnterPlanMode')}`
+        );
+
+        // W6.6 無 routing-state.json 時 EnterPlanMode 仍被 deny
+        fs.unlinkSync(routingPath); // 刪除 routing-state.json
+        const planModeNoFile = evalRouting({ tool_name: 'EnterPlanMode' });
+        assert(
+          planModeNoFile.decision === 'deny',
+          'W6.6 無 routing-state.json 時 EnterPlanMode 仍被 deny',
+          `decision: ${planModeNoFile.decision}`
+        );
+
+        // W6.7 無條件阻擋訊息包含 "architect" 指引
+        const unconditionalMsg = buildDeny({ unconditionalBlock: true });
+        assert(
+          unconditionalMsg.includes('architect'),
+          'W6.7 無條件阻擋訊息包含 architect 指引',
+          `includes: ${unconditionalMsg.includes('architect')}`
+        );
+
+        // W6.8 無條件阻擋不影響其他 EXECUTION_TOOLS（Write 在無路由時仍 allow）
+        const writeNoRoute = evalRouting({ tool_name: 'Write' });
+        assert(
+          writeNoRoute.decision === 'allow',
+          'W6.8 Write 在無路由時仍 allow',
+          `decision: ${writeNoRoute.decision}`
+        );
+
+        // W6.9 auto-fix 模式仍可繞過 EnterPlanMode 阻擋
+        const autoFixPath = path.join(tempDir, '.vibe-engine', 'auto-fix-state.json');
+        fs.writeFileSync(autoFixPath, JSON.stringify({
+          active: true,
+          iteration: 1,
+          timestamp: Date.now()
+        }));
+        const planModeAutoFix = evalRouting({ tool_name: 'EnterPlanMode' });
+        assert(
+          planModeAutoFix.decision === 'allow',
+          'W6.9 auto-fix 模式可繞過 EnterPlanMode 阻擋',
+          `decision: ${planModeAutoFix.decision}`
         );
       }
     } catch (err) {
