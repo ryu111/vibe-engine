@@ -19,9 +19,10 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync, spawn } = require('child_process');
-const { getProjectRoot } = require('./lib/common');
+const { getProjectRoot, safeReadJSON, safeWriteJSON, getVibeEnginePaths } = require('./lib/common');
 const { readHookInput, writeHookOutput, buildSuccessOutput } = require('./lib/hook-io');
 const { createBoxedReport, formatKeyValue, formatStatusIcon } = require('./lib/report-formatter');
+const { RoutingStateManager } = require('./lib/routing-state-manager');
 
 // ============================================================
 // 配置
@@ -743,12 +744,180 @@ function formatReportForDisplay(report) {
 }
 
 // ============================================================
+// Auto-Fix 狀態管理
+// ============================================================
+
+const AUTO_FIX_STATE_FILE = 'auto-fix-state.json';
+const MAX_FIX_ITERATIONS = 3;
+
+/**
+ * 載入 Auto-Fix 狀態
+ */
+function loadAutoFixState() {
+  const paths = getVibeEnginePaths();
+  const filePath = path.join(paths.root, AUTO_FIX_STATE_FILE);
+  return safeReadJSON(filePath, { active: false, iteration: 0 });
+}
+
+/**
+ * 儲存 Auto-Fix 狀態
+ */
+function saveAutoFixState(state) {
+  const paths = getVibeEnginePaths();
+  const filePath = path.join(paths.root, AUTO_FIX_STATE_FILE);
+  return safeWriteJSON(filePath, state);
+}
+
+/**
+ * 清除 Auto-Fix 狀態
+ */
+function clearAutoFixState() {
+  const paths = getVibeEnginePaths();
+  const filePath = path.join(paths.root, AUTO_FIX_STATE_FILE);
+  try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+}
+
+/**
+ * 生成修復指令
+ */
+function generateFixDirective(blockingIssues, iteration) {
+  const remaining = MAX_FIX_ITERATIONS - iteration;
+  return [
+    `🔧 AUTO-FIX (iteration ${iteration}/${MAX_FIX_ITERATIONS})`,
+    '',
+    'The following blocking issues MUST be fixed:',
+    ...blockingIssues.map((issue, i) => `  ${i + 1}. ${issue}`),
+    '',
+    `⚠️ ${remaining} attempt(s) remaining before task is blocked.`,
+    '',
+    'Instructions:',
+    '1. Fix ALL blocking issues listed above',
+    '2. Re-run tests/checks to confirm fixes',
+    '3. Verification will re-run automatically on next Stop'
+  ].join('\n');
+}
+
+/**
+ * 處理驗證失敗 — 啟動或繼續 Auto-Fix Loop
+ */
+function handleVerificationFailure(report) {
+  const blockingIssues = report.verification_report.blocking_issues || [];
+  const blockingCount = blockingIssues.length;
+  const state = loadAutoFixState();
+
+  const iteration = (state.active ? state.iteration : 0) + 1;
+
+  // 超過最大重試次數 → 阻止
+  if (iteration > MAX_FIX_ITERATIONS) {
+    clearAutoFixState();
+    const displayReport = formatReportForDisplay(report);
+    return {
+      continue: false,
+      stopReason: `⛔ AUTO-FIX EXHAUSTED: ${blockingCount} blocking issue(s) remain after ${MAX_FIX_ITERATIONS} attempts. Manual intervention required.`,
+      systemMessage: `⛔ AUTO-FIX EXHAUSTED (${MAX_FIX_ITERATIONS}/${MAX_FIX_ITERATIONS} attempts used)\n\nBlocking issues could not be resolved automatically:\n${blockingIssues.map(i => `  - ${i}`).join('\n')}\n\n🛑 Please fix these issues manually.\n\n${displayReport}`
+    };
+  }
+
+  // 儲存 auto-fix 狀態
+  const newState = {
+    active: true,
+    iteration,
+    maxIterations: MAX_FIX_ITERATIONS,
+    startedAt: state.startedAt || new Date().toISOString(),
+    originalErrors: state.originalErrors || blockingIssues,
+    fixAttempts: [
+      ...(state.fixAttempts || []),
+      { iteration, timestamp: new Date().toISOString(), errors: blockingIssues }
+    ]
+  };
+  saveAutoFixState(newState);
+
+  const fixDirective = generateFixDirective(blockingIssues, iteration);
+  const displayReport = formatReportForDisplay(report);
+
+  return {
+    continue: true,
+    systemMessage: `${fixDirective}\n\n${displayReport}`
+  };
+}
+
+/**
+ * 處理驗證成功 — 清除 Auto-Fix 狀態
+ */
+function handleVerificationSuccess() {
+  const state = loadAutoFixState();
+  if (state.active) {
+    const iterations = state.iteration;
+    clearAutoFixState();
+    return `✅ AUTO-FIX SUCCESS: All blocking issues resolved after ${iterations} iteration(s).`;
+  }
+  return null;
+}
+
+// ============================================================
+// 上下文感知檢查
+// ============================================================
+
+/**
+ * 判斷是否需要跳過驗證（fast-path）
+ * @returns {{ skip: boolean, reason: string }}
+ */
+function shouldSkipVerification(hookInput) {
+  // Fast-path 1: 有活躍路由計劃 → 讓 routing-completion-validator 處理
+  try {
+    const rsm = new RoutingStateManager();
+    if (rsm.hasActivePlan()) {
+      return { skip: true, reason: 'Active routing plan detected — deferring to routing-completion-validator' };
+    }
+  } catch { /* ignore — proceed with verification */ }
+
+  // Fast-path 2: 無代碼變更 → 跳過驗證
+  try {
+    execSync('git diff --quiet HEAD 2>/dev/null && git diff --cached --quiet HEAD 2>/dev/null', {
+      cwd: getProjectRoot(),
+      stdio: 'pipe'
+    });
+    // 也檢查是否有 untracked 新檔案（不含 .vibe-engine）
+    const untracked = execSync('git ls-files --others --exclude-standard 2>/dev/null', {
+      cwd: getProjectRoot(),
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe']
+    }).trim();
+    const relevantUntracked = untracked.split('\n').filter(f => f && !f.startsWith('.vibe-engine/'));
+    if (relevantUntracked.length === 0) {
+      return { skip: true, reason: 'No code changes detected — skipping verification' };
+    }
+  } catch {
+    // git diff 返回非零表示有變更 → 繼續驗證
+  }
+
+  // Fast-path 3: 短互動（簡單問答）→ 跳過驗證
+  if (hookInput) {
+    const transcript = hookInput.transcript_summary || '';
+    if (transcript.length < 500 && !hookInput.change_type) {
+      return { skip: true, reason: 'Short interaction with no changes — skipping verification' };
+    }
+  }
+
+  return { skip: false, reason: '' };
+}
+
+// ============================================================
 // Hook 入口
 // ============================================================
 
 async function main() {
   // 使用 lib/hook-io 讀取 hook 輸入
   const { hookInput, isHook } = await readHookInput();
+
+  // ── 上下文感知 fast-path ──
+  if (isHook) {
+    const { skip, reason } = shouldSkipVerification(hookInput);
+    if (skip) {
+      writeHookOutput(buildSuccessOutput({ systemMessage: reason }));
+      return;
+    }
+  }
 
   // 從命令列參數或 hook input 取得選項
   const args = process.argv.slice(2);
@@ -769,20 +938,22 @@ async function main() {
 
   // 輸出結果
   if (isHook) {
-    const displayReport = formatReportForDisplay(report);
     const isBlocking = report.verification_report.status === 'fail';
-    const blockingCount = report.verification_report.blocking_issues?.length || 0;
 
-    let systemMessage = displayReport;
     if (isBlocking) {
-      systemMessage = `⛔ CRITICAL: Verification FAILED - ${blockingCount} blocking issue(s) detected.\n\nMUST fix the following before proceeding:\n${report.verification_report.blocking_issues.map(i => `  - ${i}`).join('\n')}\n\n⛔ BLOCK: 未修復 blocking issues 禁止標記任務完成。\n\n${displayReport}`;
-    }
+      // ── Auto-Fix Loop ──
+      const output = handleVerificationFailure(report);
+      writeHookOutput(output);
+    } else {
+      // 驗證通過
+      const autoFixMsg = handleVerificationSuccess();
+      const displayReport = formatReportForDisplay(report);
+      const systemMessage = autoFixMsg
+        ? `${autoFixMsg}\n\n${displayReport}`
+        : displayReport;
 
-    writeHookOutput({
-      continue: !isBlocking,
-      stopReason: isBlocking ? `⛔ CRITICAL: Verification failed with ${blockingCount} blocking issues` : undefined,
-      systemMessage
-    });
+      writeHookOutput({ continue: true, systemMessage });
+    }
   } else {
     console.log(formatReportForDisplay(report));
   }
@@ -794,7 +965,16 @@ module.exports = {
   detectProjectType,
   getAvailableCommands,
   selectVerificationLevel,
-  formatReportForDisplay
+  formatReportForDisplay,
+  // 新增導出 — 供測試使用
+  shouldSkipVerification,
+  loadAutoFixState,
+  saveAutoFixState,
+  clearAutoFixState,
+  handleVerificationFailure,
+  handleVerificationSuccess,
+  generateFixDirective,
+  MAX_FIX_ITERATIONS
 };
 
 // 執行

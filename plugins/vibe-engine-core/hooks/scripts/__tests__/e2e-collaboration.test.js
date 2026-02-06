@@ -9,10 +9,14 @@
  * D. 預算耗盡 - 阻止操作
  * E. 數據流 - 序列化完整性
  * F. 自動路由執行 - 強制指令 + 狀態追蹤 + 閉環驗證
+ * G. 上下文感知驗證 + Auto-Fix 工作流
+ * H. Hook Chain 管道整合測試（真實進程 stdin/stdout）
+ * I. 分類器準確性回歸測試（路徑消除、Segmenter 詞數、複合需求、分類結果）
  */
 
 const path = require('path');
 const fs = require('fs');
+const { execSync } = require('child_process');
 
 // 導入所有核心模組
 const SCRIPTS_DIR = path.join(__dirname, '..');
@@ -20,14 +24,22 @@ const { decomposeTask, saveDecomposition, identifyTaskPattern } =
   require(path.join(SCRIPTS_DIR, 'task-decomposition-engine'));
 const { generateRoutingPlan, shouldDirectResponse, selectAgent } =
   require(path.join(SCRIPTS_DIR, 'agent-router'));
-const { runVerification, detectProjectType, selectVerificationLevel } =
-  require(path.join(SCRIPTS_DIR, 'verification-engine'));
+const {
+  runVerification, detectProjectType, selectVerificationLevel,
+  shouldSkipVerification, loadAutoFixState, saveAutoFixState,
+  clearAutoFixState, handleVerificationFailure, handleVerificationSuccess,
+  generateFixDirective, MAX_FIX_ITERATIONS
+} = require(path.join(SCRIPTS_DIR, 'verification-engine'));
 const {
   getBudgetUsage, getAlertLevel, suggestModel, recordToolUse,
   DEFAULT_BUDGET
 } = require(path.join(SCRIPTS_DIR, 'budget-tracker-engine'));
 const { parseSimpleYaml, jsonToYaml } =
   require(path.join(SCRIPTS_DIR, 'lib/yaml-parser'));
+const {
+  classifyRequest, classifyComplexity, analyzePromptMetrics,
+  sanitizePrompt, countWords, detectCompoundRequirements
+} = require(path.join(SCRIPTS_DIR, 'prompt-classifier'));
 
 // 測試上下文
 const testContext = {
@@ -583,6 +595,504 @@ async function testAutoRoutingExecution() {
 }
 
 // ============================================================
+// 場景 G: 上下文感知驗證 + Auto-Fix 工作流
+// ============================================================
+async function testContextAwareAndAutoFix() {
+  console.log('\n═══════════════════════════════════════');
+  console.log('場景 G: 上下文感知驗證 + Auto-Fix 工作流');
+  console.log('═══════════════════════════════════════\n');
+
+  // 使用臨時目錄以隔離狀態
+  const tempDir = path.join(__dirname, '.test-temp-g-' + Date.now());
+  const vibeDir = path.join(tempDir, '.vibe-engine');
+  fs.mkdirSync(vibeDir, { recursive: true });
+
+  const originalRoot = process.env.CLAUDE_PROJECT_ROOT;
+  process.env.CLAUDE_PROJECT_ROOT = tempDir;
+
+  try {
+    // Step 1: 簡單問答應跳過驗證
+    console.log('📋 Step 1: 簡單問答跳過驗證');
+    const shortInteraction = { transcript_summary: 'What is REST?' };
+    const skipResult1 = shouldSkipVerification(shortInteraction);
+
+    assert(
+      skipResult1.skip === true,
+      'G1.1 短互動跳過驗證',
+      `skip: ${skipResult1.skip}, reason: ${skipResult1.reason}`
+    );
+
+    // Step 2: 有活躍路由計劃時讓路
+    console.log('\n📋 Step 2: 活躍路由讓路');
+    const { RoutingStateManager } = require(path.join(SCRIPTS_DIR, 'lib/routing-state-manager'));
+    const manager = new RoutingStateManager(tempDir);
+
+    // 創建一個活躍計劃
+    const mockPlan = {
+      strategy: 'sequential',
+      phases: [{ name: 'phase1', tasks: [{ id: 'task-1', agent: 'developer', description: 'test' }] }]
+    };
+    manager.createPlan(mockPlan, 'test request');
+
+    const skipResult2 = shouldSkipVerification(null);
+
+    assert(
+      skipResult2.skip === true,
+      'G2.1 有活躍路由時跳過驗證',
+      `skip: ${skipResult2.skip}, reason: ${skipResult2.reason}`
+    );
+
+    // 清理路由狀態讓後續測試正常
+    manager.markPlanCompleted();
+
+    // Step 3: 首次驗證失敗 → 啟動 Auto-Fix
+    console.log('\n📋 Step 3: 首次失敗啟動 Auto-Fix');
+    clearAutoFixState();
+
+    const failedReport = {
+      verification_report: {
+        status: 'fail',
+        blocking_issues: ['TypeScript compile error in auth.ts', 'Test suite failed: 2 tests'],
+        level: 'standard',
+        project_type: 'node',
+        budget_remaining: '70%',
+        layers: {
+          static: {
+            status: 'fail',
+            checks: [{ name: 'typecheck', priority: 'P0', status: 'fail' }]
+          },
+          unit: {
+            status: 'fail',
+            checks: [{ name: 'jest', priority: 'P1', status: 'fail' }]
+          }
+        },
+        warnings: [],
+        recommendations: []
+      }
+    };
+
+    const failOutput = handleVerificationFailure(failedReport);
+
+    assert(
+      failOutput.continue === true,
+      'G3.1 首次失敗 continue=true（允許修復）',
+      `continue: ${failOutput.continue}`
+    );
+
+    assert(
+      failOutput.systemMessage && failOutput.systemMessage.includes('AUTO-FIX'),
+      'G3.2 輸出包含 AUTO-FIX 指令',
+      `has AUTO-FIX: ${failOutput.systemMessage?.includes('AUTO-FIX')}`
+    );
+
+    const state1 = loadAutoFixState();
+
+    assert(
+      state1.active === true && state1.iteration === 1,
+      'G3.3 Auto-Fix 狀態已記錄（iteration=1）',
+      `active: ${state1.active}, iteration: ${state1.iteration}`
+    );
+
+    // Step 4: 修復後驗證成功 → 清除狀態
+    console.log('\n📋 Step 4: 修復後成功清除狀態');
+    const successMsg = handleVerificationSuccess();
+
+    assert(
+      successMsg && successMsg.includes('AUTO-FIX SUCCESS'),
+      'G4.1 成功訊息包含 AUTO-FIX SUCCESS',
+      `msg: ${successMsg}`
+    );
+
+    const stateAfterClear = loadAutoFixState();
+
+    assert(
+      stateAfterClear.active === false,
+      'G4.2 狀態已清除',
+      `active: ${stateAfterClear.active}`
+    );
+
+    // Step 5: 達到上限 → 阻止
+    console.log('\n📋 Step 5: 達到上限阻止');
+    clearAutoFixState();
+
+    // 模擬已達到最大迭代
+    saveAutoFixState({
+      active: true,
+      iteration: MAX_FIX_ITERATIONS,
+      maxIterations: MAX_FIX_ITERATIONS,
+      startedAt: new Date().toISOString(),
+      originalErrors: ['error1'],
+      fixAttempts: Array.from({ length: MAX_FIX_ITERATIONS }, (_, i) => ({
+        iteration: i + 1,
+        timestamp: new Date().toISOString(),
+        errors: ['error1']
+      }))
+    });
+
+    const exhaustedOutput = handleVerificationFailure(failedReport);
+
+    assert(
+      exhaustedOutput.continue === false,
+      'G5.1 達上限後 continue=false（阻止）',
+      `continue: ${exhaustedOutput.continue}`
+    );
+
+    assert(
+      exhaustedOutput.stopReason && exhaustedOutput.stopReason.includes('EXHAUSTED'),
+      'G5.2 stopReason 包含 EXHAUSTED',
+      `stopReason: ${exhaustedOutput.stopReason}`
+    );
+
+    // Step 6: generateFixDirective 格式驗證
+    console.log('\n📋 Step 6: 修復指令格式');
+    const directive = generateFixDirective(
+      ['TypeScript compile error', 'Test failure'],
+      2
+    );
+
+    assert(
+      directive.includes('iteration 2/') && directive.includes('attempt(s) remaining'),
+      'G6.1 修復指令包含迭代資訊和剩餘次數',
+      `directive 長度: ${directive.length}`
+    );
+
+    assert(
+      directive.includes('TypeScript compile error') && directive.includes('Test failure'),
+      'G6.2 修復指令列出所有 blocking issues',
+      `has issues: ${directive.includes('TypeScript compile error')}`
+    );
+
+  } finally {
+    // 清理
+    process.env.CLAUDE_PROJECT_ROOT = originalRoot;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  console.log('\n✅ 場景 G 完成');
+}
+
+// ============================================================
+// 場景 H: Hook Chain 管道整合測試（真實進程 stdin/stdout）
+// ============================================================
+
+/**
+ * 執行 hook 腳本並解析 JSON 輸出
+ */
+function runHookScript(scriptName, stdinData, env = {}) {
+  const scriptPath = path.join(SCRIPTS_DIR, scriptName);
+  const result = execSync(`node "${scriptPath}"`, {
+    input: JSON.stringify(stdinData),
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+    timeout: 15000,
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+  // 提取最後一個有效 JSON（腳本可能有其他 console.log）
+  const lines = result.trim().split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try { return JSON.parse(lines[i]); } catch { continue; }
+  }
+  return null;
+}
+
+async function testHookChainPipeline() {
+  console.log('\n═══════════════════════════════════════');
+  console.log('場景 H: Hook Chain 管道整合測試');
+  console.log('═══════════════════════════════════════\n');
+
+  const tempDir = path.join(__dirname, '.test-temp-h-' + Date.now());
+  const vibeDir = path.join(tempDir, '.vibe-engine');
+  fs.mkdirSync(path.join(vibeDir, 'tasks'), { recursive: true });
+
+  const originalRoot = process.env.CLAUDE_PROJECT_ROOT;
+  const hookEnv = {
+    CLAUDE_PROJECT_ROOT: tempDir,
+    CLAUDE_PLUGIN_ROOT: path.join(__dirname, '../..')
+  };
+
+  process.env.CLAUDE_PROJECT_ROOT = tempDir;
+
+  try {
+    const triggerPrompt = '幫我在 test-projects/phone-login 專案中加入忘記密碼功能，要有 UI 和驗證邏輯';
+
+    // ── H1: UserPromptSubmit 完整管道 ──
+    console.log('📋 Step 1: prompt-classifier（進程執行）');
+    const step1 = runHookScript('prompt-classifier.js', { user_prompt: triggerPrompt }, hookEnv);
+
+    assert(
+      step1 && step1.continue === true,
+      'H1.1 prompt-classifier 進程執行成功',
+      `output: ${JSON.stringify(step1)?.substring(0, 100)}`
+    );
+
+    assert(
+      step1.hookSpecificOutput?.complexity === 'moderate',
+      'H1.2 觸發詞分類為 moderate',
+      `complexity: ${step1?.hookSpecificOutput?.complexity}`
+    );
+
+    assert(
+      step1.hookSpecificOutput.requestType === 'action' || step1.hookSpecificOutput.requestType === 'multi-step',
+      'H1.3 requestType 為 action 或 multi-step',
+      `requestType: ${step1?.hookSpecificOutput?.requestType}`
+    );
+
+    assert(
+      step1.hookSpecificOutput?.needsDecomposition === true,
+      'H1.4 觸發詞 needsDecomposition 為 true',
+      `needsDecomposition: ${step1?.hookSpecificOutput?.needsDecomposition}`
+    );
+
+    console.log('\n📋 Step 2: task-decomposition-engine（進程執行，接收分類結果）');
+    const step2 = runHookScript('task-decomposition-engine.js', {
+      user_prompt: triggerPrompt,
+      hookSpecificOutput: step1.hookSpecificOutput
+    }, hookEnv);
+
+    assert(
+      step2 && step2.continue === true,
+      'H2.1 task-decomposition 進程執行成功',
+      `output: ${JSON.stringify(step2)?.substring(0, 100)}`
+    );
+
+    assert(
+      step2.hookSpecificOutput?.decomposition?.task_decomposition?.subtasks?.length >= 2,
+      'H2.2 分解出 2+ 子任務',
+      `subtasks: ${step2?.hookSpecificOutput?.decomposition?.task_decomposition?.subtasks?.length}`
+    );
+
+    console.log('\n📋 Step 3: agent-router（進程執行，接收分解結果）');
+    const step3 = runHookScript('agent-router.js', {
+      user_prompt: triggerPrompt,
+      hookSpecificOutput: step2.hookSpecificOutput
+    }, hookEnv);
+
+    assert(
+      step3 && step3.continue === true,
+      'H3.1 agent-router 進程執行成功',
+      `output: ${JSON.stringify(step3)?.substring(0, 100)}`
+    );
+
+    assert(
+      step3.systemMessage && step3.systemMessage.includes('MANDATORY'),
+      'H3.2 systemMessage 包含 MANDATORY 強制指令',
+      `has MANDATORY: ${step3?.systemMessage?.includes('MANDATORY')}`
+    );
+
+    assert(
+      step3.hookSpecificOutput?.isDirective === true && step3.hookSpecificOutput?.planId,
+      'H3.3 輸出包含 isDirective=true 和 planId',
+      `isDirective: ${step3?.hookSpecificOutput?.isDirective}, planId: ${step3?.hookSpecificOutput?.planId}`
+    );
+
+    // ── H2: Stop 鏈 — 活躍路由時跳過驗證 ──
+    console.log('\n📋 Step 4: verification-engine（活躍路由 → fast-path 跳過）');
+    const step4 = runHookScript('verification-engine.js', {
+      transcript_summary: '執行了部分任務，正在進行中',
+      reason: 'stop'
+    }, hookEnv);
+
+    assert(
+      step4 && step4.continue === true,
+      'H4.1 有活躍路由時驗證被跳過',
+      `continue: ${step4?.continue}`
+    );
+
+    assert(
+      step4.systemMessage && step4.systemMessage.includes('Active routing plan'),
+      'H4.2 跳過原因包含 Active routing plan',
+      `systemMessage: ${step4?.systemMessage?.substring(0, 80)}`
+    );
+
+    // ── H3: 清除路由後 — 短互動跳過 ──
+    console.log('\n📋 Step 5: verification-engine（短互動 → fast-path 跳過）');
+    // 清除路由狀態
+    const routingStatePath = path.join(vibeDir, 'routing-state.json');
+    try { fs.unlinkSync(routingStatePath); } catch { /* ignore */ }
+
+    const step5 = runHookScript('verification-engine.js', {
+      transcript_summary: 'REST API 是什麼'
+    }, hookEnv);
+
+    assert(
+      step5 && step5.continue === true,
+      'H5.1 短互動驗證被跳過',
+      `continue: ${step5?.continue}`
+    );
+
+    // ── H4: prompt-classifier 多樣分類 ──
+    console.log('\n📋 Step 6: prompt-classifier 分類多樣性');
+    const simpleQuery = runHookScript('prompt-classifier.js', {
+      user_prompt: '什麼是 REST API？'
+    }, hookEnv);
+
+    assert(
+      simpleQuery?.hookSpecificOutput?.complexity === 'simple',
+      'H6.1 簡單查詢分類為 simple',
+      `complexity: ${simpleQuery?.hookSpecificOutput?.complexity}`
+    );
+
+  } finally {
+    process.env.CLAUDE_PROJECT_ROOT = originalRoot;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  console.log('\n✅ 場景 H 完成');
+}
+
+// ============================================================
+// 場景 I: 分類器準確性回歸測試
+// ============================================================
+async function testClassifierAccuracy() {
+  console.log('\n═══════════════════════════════════════');
+  console.log('場景 I: 分類器準確性回歸測試');
+  console.log('═══════════════════════════════════════\n');
+
+  const tempDir = path.join(__dirname, '.test-temp-i-' + Date.now());
+  const vibeDir = path.join(tempDir, '.vibe-engine');
+  fs.mkdirSync(path.join(vibeDir, 'tasks'), { recursive: true });
+
+  const originalRoot = process.env.CLAUDE_PROJECT_ROOT;
+  const hookEnv = {
+    CLAUDE_PROJECT_ROOT: tempDir,
+    CLAUDE_PLUGIN_ROOT: path.join(__dirname, '../..')
+  };
+  process.env.CLAUDE_PROJECT_ROOT = tempDir;
+
+  try {
+    // ── I1: 路徑消除 ──
+    console.log('📋 Step 1: 路徑消除');
+    const { sanitized, paths } = sanitizePrompt(
+      '幫我在 test-projects/phone-login 專案中加入功能'
+    );
+
+    assert(
+      paths.length === 1 && paths[0] === 'test-projects/phone-login',
+      'I1.1 偵測到路徑 token',
+      `paths: ${JSON.stringify(paths)}`
+    );
+
+    assert(
+      !sanitized.includes('test-projects'),
+      'I1.2 路徑已從 sanitized 移除',
+      `sanitized: ${sanitized}`
+    );
+
+    // ── I2: Intl.Segmenter 詞數 ──
+    console.log('\n📋 Step 2: 中文詞數計算');
+    const wc1 = countWords('幫我在專案中加入忘記密碼功能');
+    const wc2 = countWords('implement user authentication');
+
+    assert(
+      wc1 >= 7 && wc1 <= 12,
+      'I2.1 中文詞數在合理範圍（7-12）',
+      `wordCount: ${wc1}`
+    );
+
+    assert(
+      wc2 === 3,
+      'I2.2 英文詞數不受影響',
+      `wordCount: ${wc2}`
+    );
+
+    // ── I3: 複合需求偵測 ──
+    console.log('\n📋 Step 3: 複合需求偵測');
+    const cr1 = detectCompoundRequirements('要有 UI 和驗證邏輯');
+    const cr2 = detectCompoundRequirements('包含註冊、登入、忘記密碼三個功能');
+    const cr3 = detectCompoundRequirements('修復這個 bug');
+
+    assert(
+      cr1.count === 2,
+      'I3.1 "要有 UI 和驗證邏輯" → 2 子需求',
+      `count: ${cr1.count}`
+    );
+
+    assert(
+      cr2.count >= 3,
+      'I3.2 "包含註冊、登入、忘記密碼" → 3+ 子需求',
+      `count: ${cr2.count}`
+    );
+
+    assert(
+      cr3.count === 0,
+      'I3.3 無需求動詞 → 0 子需求',
+      `count: ${cr3.count}`
+    );
+
+    // ── I4: 分類結果回歸 ──
+    console.log('\n📋 Step 4: 分類結果回歸');
+
+    const case1 = classifyRequest('什麼是 REST API？');
+    assert(
+      case1.complexity === 'simple' && case1.requestType === 'query',
+      'I4.1 純查詢 → simple/query',
+      `${case1.complexity}/${case1.requestType}`
+    );
+
+    const case2 = classifyRequest('修復 auth.js 中的登入驗證 bug');
+    assert(
+      case2.complexity === 'moderate',
+      'I4.2 單一修復 → moderate',
+      `complexity: ${case2.complexity}`
+    );
+
+    const case3 = classifyRequest(
+      '幫我在 test-projects/phone-login 專案中加入忘記密碼功能，要有 UI 和驗證邏輯'
+    );
+    assert(
+      case3.complexity === 'moderate',
+      'I4.3 路徑+複合需求 → moderate（非 simple）',
+      `complexity: ${case3.complexity}`
+    );
+    assert(
+      case3.needsDecomposition === true,
+      'I4.4 moderate + 複合需求 → needsDecomposition',
+      `needsDecomposition: ${case3.needsDecomposition}`
+    );
+
+    const case4 = classifyRequest('重構整個專案的認證模組，需要修改多個檔案');
+    assert(
+      case4.complexity === 'complex',
+      'I4.5 整個+重構+多個 → complex',
+      `complexity: ${case4.complexity}`
+    );
+
+    // ── I5: 路徑誤判防護 ──
+    console.log('\n📋 Step 5: 路徑誤判防護');
+    const case5 = classifyRequest('查看 test-results/output.json 的內容');
+    assert(
+      case5.complexity === 'simple',
+      'I5.1 含 test 路徑的查詢不誤判為 moderate',
+      `complexity: ${case5.complexity}`
+    );
+
+    // ── I6: 進程執行回歸 ──
+    console.log('\n📋 Step 6: 進程執行回歸');
+    const step6 = runHookScript('prompt-classifier.js', {
+      user_prompt: '幫我在 test-projects/phone-login 專案中加入忘記密碼功能，要有 UI 和驗證邏輯'
+    }, hookEnv);
+
+    assert(
+      step6?.hookSpecificOutput?.complexity === 'moderate',
+      'I6.1 觸發詞進程執行結果為 moderate',
+      `complexity: ${step6?.hookSpecificOutput?.complexity}`
+    );
+
+    assert(
+      step6?.hookSpecificOutput?.needsDecomposition === true,
+      'I6.2 觸發詞 needsDecomposition 為 true',
+      `needsDecomposition: ${step6?.hookSpecificOutput?.needsDecomposition}`
+    );
+
+  } finally {
+    process.env.CLAUDE_PROJECT_ROOT = originalRoot;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  console.log('\n✅ 場景 I 完成');
+}
+
+// ============================================================
 // 主測試執行
 // ============================================================
 async function runAllTests() {
@@ -597,7 +1107,10 @@ async function runAllTests() {
     await testSimpleQueryWorkflow();
     await testBudgetExceededWorkflow();
     await testDataFlowIntegrity();
-    await testAutoRoutingExecution();  // 新增場景 F
+    await testAutoRoutingExecution();
+    await testContextAwareAndAutoFix();  // 場景 G
+    await testHookChainPipeline();        // 場景 H
+    await testClassifierAccuracy();       // 場景 I
   } catch (error) {
     console.error('\n❌ 測試執行錯誤:', error.message);
     console.error(error.stack);
