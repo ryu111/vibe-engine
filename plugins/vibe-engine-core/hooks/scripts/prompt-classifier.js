@@ -619,7 +619,12 @@ async function main() {
     };
 
     if (classification.complexity === 'complex') {
-      output.systemMessage = `[Vibe Engine] Complex request detected (${classification.requestType}). Task decomposition recommended. [method: ${classification.classificationMethod}]`;
+      const message = `[Vibe Engine] Complex request detected (${classification.requestType}). Task decomposition recommended. [method: ${classification.classificationMethod}]`;
+      output.systemMessage = message;
+      output.hookSpecificOutput = {
+        hookEventName: 'UserPromptSubmit',
+        additionalContext: message
+      };
     }
 
     console.log(JSON.stringify(output));

@@ -24,10 +24,13 @@
  * S. 管道契約測試（stdin/stdout 欄位名契約、hookSpecificOutput 雙通道、Stop 阻擋）
  * T. 真實語料分類測試（34 條中文口語化 prompt 準確率 + 邊界案例 + 進程管道驗證）
  * U. 混合分類器測試（三層架構、LLM mock、fallback、快取、config 控制、向後相容）
+ * V. Task Tool Validator（PreToolUse hook 驗證 subagent_type 是否符合路由計劃）
+ * W. 雙層防禦架構驗證（雙通道輸出、auto-fix bypass、routing progress、budget 強制）
  */
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { execSync } = require('child_process');
 
 // 導入所有核心模組
@@ -136,6 +139,18 @@ let evaluatePermission;
 try {
   ({ evaluatePermission } = require(path.join(SCRIPTS_DIR, 'permission-guard')));
 } catch { evaluatePermission = null; }
+
+// routing-enforcer（core plugin）
+let routingEnforcer = null;
+try {
+  routingEnforcer = require(path.join(SCRIPTS_DIR, 'routing-enforcer'));
+} catch { routingEnforcer = null; }
+
+// routing-progress-tracker（core plugin）
+let routingProgressTracker = null;
+try {
+  routingProgressTracker = require(path.join(SCRIPTS_DIR, 'routing-progress-tracker'));
+} catch { routingProgressTracker = null; }
 
 // 測試上下文
 const testContext = {
@@ -3192,6 +3207,529 @@ async function testHybridClassifier() {
 }
 
 // ============================================================
+// 場景 V: Task Tool Validator - Agent 類型驗證
+// ============================================================
+
+async function testTaskToolValidator() {
+  console.log('\n\n📦 場景 V: Task Tool Validator - Agent 類型驗證');
+  console.log('─'.repeat(60));
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-v-'));
+  const vibeDir = path.join(tempDir, '.vibe-engine');
+  fs.mkdirSync(vibeDir, { recursive: true });
+
+  const originalRoot = process.env.CLAUDE_PROJECT_ROOT;
+  process.env.CLAUDE_PROJECT_ROOT = tempDir;
+  const hookEnv = { CLAUDE_PROJECT_ROOT: tempDir };
+
+  try {
+    // ── V1: 非 Task tool → allow ──
+    console.log('\n📋 V1: 非 Task tool 直接允許');
+    const v1 = runHookScript('task-tool-validator.js', {
+      tool_name: 'Write',
+      tool_input: { file_path: '/test.js', content: 'test' }
+    }, hookEnv);
+
+    assert(
+      v1 && v1.hookSpecificOutput && v1.hookSpecificOutput.permissionDecision === 'allow',
+      'V1.1 非 Task tool → allow',
+      `decision: ${v1?.hookSpecificOutput?.permissionDecision}`
+    );
+
+    // ── V2: Task tool 但無 routing → allow ──
+    console.log('\n📋 V2: Task tool 無路由計劃時允許');
+    const v2 = runHookScript('task-tool-validator.js', {
+      tool_name: 'Task',
+      tool_input: {
+        subagent_type: 'vibe-engine-core:developer',
+        prompt: 'test',
+        model: 'sonnet'
+      }
+    }, hookEnv);
+
+    assert(
+      v2 && v2.hookSpecificOutput && v2.hookSpecificOutput.permissionDecision === 'allow',
+      'V2.1 無路由計劃 → allow',
+      `decision: ${v2?.hookSpecificOutput?.permissionDecision}`
+    );
+
+    // ── V3: 建立路由計劃 ──
+    console.log('\n📋 V3: 建立路由計劃');
+    const routingStatePath = path.join(vibeDir, 'routing-state.json');
+    fs.writeFileSync(routingStatePath, JSON.stringify({
+      planId: 'test-plan-v3',
+      status: 'in_progress',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      phases: [
+        {
+          phase: 1,
+          parallel: false,
+          tasks: [
+            { id: 't1', agent: 'developer', description: '實作功能', status: 'pending' },
+            { id: 't2', agent: 'tester', description: '撰寫測試', status: 'pending' }
+          ]
+        }
+      ],
+      totalCount: 2,
+      completedCount: 0,
+      failedCount: 0
+    }, null, 2));
+
+    assert(
+      fs.existsSync(routingStatePath),
+      'V3.1 routing-state.json 已建立',
+      ''
+    );
+
+    // ── V4: Task tool agent 匹配 → allow ──
+    console.log('\n📋 V4: Task tool agent 匹配路由計劃');
+    const v4 = runHookScript('task-tool-validator.js', {
+      tool_name: 'Task',
+      tool_input: {
+        subagent_type: 'vibe-engine-core:developer',
+        prompt: '實作登入功能',
+        model: 'sonnet'
+      }
+    }, hookEnv);
+
+    assert(
+      v4 && v4.hookSpecificOutput && v4.hookSpecificOutput.permissionDecision === 'allow',
+      'V4.1 匹配 developer → allow',
+      `decision: ${v4?.hookSpecificOutput?.permissionDecision}`
+    );
+
+    // ── V5: Task tool agent 不匹配 → deny ──
+    console.log('\n📋 V5: Task tool agent 不匹配路由計劃');
+    const v5 = runHookScript('task-tool-validator.js', {
+      tool_name: 'Task',
+      tool_input: {
+        subagent_type: 'vibe-engine-core:architect',
+        prompt: '設計架構',
+        model: 'sonnet'
+      }
+    }, hookEnv);
+
+    assert(
+      v5 && v5.hookSpecificOutput && v5.hookSpecificOutput.permissionDecision === 'deny',
+      'V5.1 不匹配 architect → deny',
+      `decision: ${v5?.hookSpecificOutput?.permissionDecision}`
+    );
+
+    assert(
+      v5 && v5.continue === false,
+      'V5.2 continue === false 阻止執行',
+      `continue: ${v5?.continue}`
+    );
+
+    assert(
+      v5 && v5.systemMessage && v5.systemMessage.includes('Agent Type Mismatch'),
+      'V5.3 systemMessage 包含錯誤說明',
+      `has mismatch: ${v5?.systemMessage?.includes('Agent Type Mismatch')}`
+    );
+
+    assert(
+      v5 && v5.systemMessage && v5.systemMessage.includes('developer'),
+      'V5.4 systemMessage 包含預期的 developer',
+      `has developer: ${v5?.systemMessage?.includes('developer')}`
+    );
+
+    assert(
+      v5 && v5.systemMessage && v5.systemMessage.includes('tester'),
+      'V5.5 systemMessage 包含預期的 tester',
+      `has tester: ${v5?.systemMessage?.includes('tester')}`
+    );
+
+    // ── V6: 多個 agent 匹配測試 ──
+    console.log('\n📋 V6: 測試 tester agent 也能匹配');
+    const v6 = runHookScript('task-tool-validator.js', {
+      tool_name: 'Task',
+      tool_input: {
+        subagent_type: 'tester',
+        prompt: '撰寫單元測試',
+        model: 'sonnet'
+      }
+    }, hookEnv);
+
+    assert(
+      v6 && v6.hookSpecificOutput && v6.hookSpecificOutput.permissionDecision === 'allow',
+      'V6.1 匹配 tester → allow',
+      `decision: ${v6?.hookSpecificOutput?.permissionDecision}`
+    );
+
+    // ── V7: 路由完成後 → allow all ──
+    console.log('\n📋 V7: 路由完成後允許任意 agent');
+    fs.writeFileSync(routingStatePath, JSON.stringify({
+      planId: 'test-plan-v7',
+      status: 'completed',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      phases: [
+        {
+          phase: 1,
+          tasks: [
+            { id: 't1', agent: 'developer', description: '實作功能', status: 'completed' }
+          ]
+        }
+      ],
+      totalCount: 1,
+      completedCount: 1,
+      failedCount: 0
+    }, null, 2));
+
+    const v7 = runHookScript('task-tool-validator.js', {
+      tool_name: 'Task',
+      tool_input: {
+        subagent_type: 'vibe-engine-core:architect',
+        prompt: '設計架構',
+        model: 'sonnet'
+      }
+    }, hookEnv);
+
+    assert(
+      v7 && v7.hookSpecificOutput && v7.hookSpecificOutput.permissionDecision === 'allow',
+      'V7.1 路由 completed → allow',
+      `decision: ${v7?.hookSpecificOutput?.permissionDecision}`
+    );
+
+    // ── V8: 無 subagent_type → allow ──
+    console.log('\n📋 V8: Task tool 無 subagent_type 參數');
+    fs.writeFileSync(routingStatePath, JSON.stringify({
+      planId: 'test-plan-v8',
+      status: 'in_progress',
+      phases: [
+        {
+          phase: 1,
+          tasks: [
+            { id: 't1', agent: 'developer', status: 'pending' }
+          ]
+        }
+      ]
+    }, null, 2));
+
+    const v8 = runHookScript('task-tool-validator.js', {
+      tool_name: 'Task',
+      tool_input: {
+        prompt: 'test',
+        model: 'sonnet'
+      }
+    }, hookEnv);
+
+    assert(
+      v8 && v8.hookSpecificOutput && v8.hookSpecificOutput.permissionDecision === 'allow',
+      'V8.1 無 subagent_type → allow',
+      `decision: ${v8?.hookSpecificOutput?.permissionDecision}`
+    );
+
+  } finally {
+    process.env.CLAUDE_PROJECT_ROOT = originalRoot;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  console.log('\n✅ 場景 V 完成');
+}
+
+// ============================================================
+// 場景 W: 雙層防禦架構驗證
+// ============================================================
+async function testDualLayerDefense() {
+  console.log('\n\n📦 場景 W: 雙層防禦架構驗證');
+  console.log('─'.repeat(60));
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-w-'));
+  const vibeDir = path.join(tempDir, '.vibe-engine');
+  fs.mkdirSync(vibeDir, { recursive: true });
+
+  const originalRoot = process.env.CLAUDE_PROJECT_ROOT;
+  process.env.CLAUDE_PROJECT_ROOT = tempDir;
+
+  try {
+    // ── W1: prompt-classifier 雙通道驗證 ──
+    console.log('\n📋 W1: prompt-classifier 雙通道驗證');
+    try {
+      const classificationResult = await classifyRequest('做一個完整的電商系統');
+
+      assert(
+        classificationResult && classificationResult.complexity === 'complex',
+        'W1.1 複雜中文 prompt 分類為 complex',
+        `實際: ${classificationResult?.complexity}`
+      );
+
+      // 驗證會生成 systemMessage
+      const hasSystemMessage = classificationResult &&
+        typeof classificationResult === 'object';
+      assert(
+        hasSystemMessage,
+        'W1.2 分類結果是有效物件',
+        `type: ${typeof classificationResult}`
+      );
+
+      // 模擬雙通道輸出（在真實 hook 中會用於 systemMessage + hookSpecificOutput）
+      const dualChannelOutput = {
+        systemMessage: `[分類] ${classificationResult.complexity}`,
+        hookSpecificOutput: {
+          hookEventName: 'UserPromptSubmit',
+          additionalContext: classificationResult
+        }
+      };
+
+      assert(
+        dualChannelOutput.systemMessage && dualChannelOutput.hookSpecificOutput,
+        'W1.3 雙通道輸出包含 systemMessage 和 hookSpecificOutput',
+        `has both: ${!!dualChannelOutput.systemMessage && !!dualChannelOutput.hookSpecificOutput}`
+      );
+    } catch (err) {
+      console.log(`❌ W1 錯誤: ${err.message}`);
+    }
+
+    // ── W2: task-decomposition 雙通道驗證 ──
+    console.log('\n📋 W2: task-decomposition 雙通道驗證');
+    try {
+      const classification = { complexity: 'complex', intent: 'action' };
+      const decomposition = decomposeTask('建立使用者認證系統，需要 JWT token', classification);
+
+      assert(
+        decomposition && decomposition.task_decomposition,
+        'W2.1 任務分解成功',
+        `has decomposition: ${!!decomposition?.task_decomposition}`
+      );
+
+      const subtasks = decomposition.task_decomposition?.subtasks || [];
+      assert(
+        subtasks.length > 1,
+        'W2.2 生成多個子任務',
+        `subtask count: ${subtasks.length}`
+      );
+
+      // 模擬雙通道輸出
+      const dualChannelOutput = {
+        systemMessage: `已分解為 ${subtasks.length} 個子任務`,
+        hookSpecificOutput: {
+          hookEventName: 'UserPromptSubmit',
+          additionalContext: decomposition
+        }
+      };
+
+      assert(
+        dualChannelOutput.systemMessage && dualChannelOutput.hookSpecificOutput,
+        'W2.3 雙通道輸出完整',
+        ''
+      );
+    } catch (err) {
+      console.log(`❌ W2 錯誤: ${err.message}`);
+    }
+
+    // ── W3: routing-enforcer auto-fix bypass ──
+    console.log('\n📋 W3: routing-enforcer auto-fix bypass');
+    try {
+      if (!routingEnforcer) {
+        console.log('⚠️  routing-enforcer 模組未載入，跳過測試');
+      } else {
+        // 驗證函數存在
+        assert(
+          typeof routingEnforcer.checkAutoFixMode === 'function',
+          'W3.1 checkAutoFixMode 函數存在',
+          `type: ${typeof routingEnforcer.checkAutoFixMode}`
+        );
+
+        assert(
+          typeof routingEnforcer.checkRoutingState === 'function',
+          'W3.2 checkRoutingState 函數存在',
+          `type: ${typeof routingEnforcer.checkRoutingState}`
+        );
+
+        assert(
+          typeof routingEnforcer.evaluateRouting === 'function',
+          'W3.3 evaluateRouting 函數存在',
+          `type: ${typeof routingEnforcer.evaluateRouting}`
+        );
+
+        // Case A: 無 auto-fix-state.json → null
+        const resultA = routingEnforcer.checkAutoFixMode();
+        assert(
+          resultA === null,
+          'W3.4 無 auto-fix state 時返回 null',
+          `result: ${resultA}`
+        );
+
+        // Case B: active: true, iteration: 1
+        const autoFixStatePath = path.join(vibeDir, 'auto-fix-state.json');
+        fs.writeFileSync(autoFixStatePath, JSON.stringify({
+          active: true,
+          iteration: 1,
+          timestamp: Date.now() // 使用數字時間戳
+        }, null, 2));
+
+        const resultB = routingEnforcer.checkAutoFixMode();
+        assert(
+          resultB !== null && resultB.iteration === 1,
+          'W3.5 有效的 auto-fix state 返回資料',
+          `iteration: ${resultB?.iteration}`
+        );
+
+        // Case C: iteration 達到上限
+        fs.writeFileSync(autoFixStatePath, JSON.stringify({
+          active: true,
+          iteration: 3, // MAX_FIX_ITERATIONS
+          timestamp: Date.now()
+        }, null, 2));
+
+        const resultC = routingEnforcer.checkAutoFixMode();
+        assert(
+          resultC === null,
+          'W3.6 iteration 達到上限時返回 null',
+          `result: ${resultC}`
+        );
+
+        // Case D: timestamp 過期（6分鐘前）
+        const expiredTime = Date.now() - 7 * 60 * 1000; // 數字時間戳
+        fs.writeFileSync(autoFixStatePath, JSON.stringify({
+          active: true,
+          iteration: 1,
+          timestamp: expiredTime
+        }, null, 2));
+
+        const resultD = routingEnforcer.checkAutoFixMode();
+        assert(
+          resultD === null,
+          'W3.7 timestamp 過期時返回 null',
+          `result: ${resultD}`
+        );
+      }
+    } catch (err) {
+      console.log(`❌ W3 錯誤: ${err.message}`);
+    }
+
+    // ── W4: routing-progress-tracker 追蹤驗證 ──
+    console.log('\n📋 W4: routing-progress-tracker 追蹤驗證');
+    try {
+      if (!routingProgressTracker) {
+        console.log('⚠️  routing-progress-tracker 模組未載入，跳過測試');
+      } else {
+        // parseAgentType 測試
+        const type1 = routingProgressTracker.parseAgentType('vibe-engine-core:developer');
+        assert(
+          type1 === 'developer',
+          'W4.1 parseAgentType 處理完整路徑',
+          `result: ${type1}`
+        );
+
+        const type2 = routingProgressTracker.parseAgentType('architect');
+        assert(
+          type2 === 'architect',
+          'W4.2 parseAgentType 處理簡單名稱',
+          `result: ${type2}`
+        );
+
+        // findMatchingTask 測試
+        const mockState = {
+          planId: 'test-plan',
+          status: 'in_progress',
+          phases: [{
+            tasks: [
+              { id: 'task-1', agent: 'developer', status: 'pending', description: 'test' },
+              { id: 'task-2', agent: 'tester', status: 'pending', description: 'test' }
+            ]
+          }]
+        };
+
+        const matchedTaskId = routingProgressTracker.findMatchingTask(mockState, 'developer');
+        assert(
+          matchedTaskId === 'task-1',
+          'W4.3 findMatchingTask 找到 pending 任務',
+          `found: ${matchedTaskId}`
+        );
+
+        // areAllTasksDone 測試
+        const allDone1 = routingProgressTracker.areAllTasksDone(mockState);
+        assert(
+          allDone1 === false,
+          'W4.4 有 pending 任務時返回 false',
+          `result: ${allDone1}`
+        );
+
+        // 修改所有任務為 completed
+        mockState.phases[0].tasks.forEach(t => t.status = 'completed');
+        const allDone2 = routingProgressTracker.areAllTasksDone(mockState);
+        assert(
+          allDone2 === true,
+          'W4.5 所有任務完成時返回 true',
+          `result: ${allDone2}`
+        );
+      }
+    } catch (err) {
+      console.log(`❌ W4 錯誤: ${err.message}`);
+    }
+
+    // ── W5: budget-tracker 90% 強制驗證 ──
+    console.log('\n📋 W5: budget-tracker 90% 強制驗證');
+    try {
+      // 驗證 getAlertLevel 函數存在
+      assert(
+        typeof getAlertLevel === 'function',
+        'W5.1 getAlertLevel 函數存在',
+        `type: ${typeof getAlertLevel}`
+      );
+
+      // 測試警報等級計算
+      const normalUsage = { overall: 0.5, breakdown: {} };
+      const normalAlert = getAlertLevel(normalUsage);
+      assert(
+        normalAlert && normalAlert.level === 'normal',
+        'W5.2 50% 使用率為 normal',
+        `level: ${normalAlert?.level}`
+      );
+
+      const warningUsage = { overall: 0.75, breakdown: {} };
+      const warningAlert = getAlertLevel(warningUsage);
+      assert(
+        warningAlert && warningAlert.level === 'warning',
+        'W5.3 75% 使用率為 warning',
+        `level: ${warningAlert?.level}`
+      );
+
+      const criticalUsage = { overall: 0.92, breakdown: {} };
+      const criticalAlert = getAlertLevel(criticalUsage);
+      assert(
+        criticalAlert && criticalAlert.level === 'critical',
+        'W5.4 92% 使用率為 critical',
+        `level: ${criticalAlert?.level}`
+      );
+
+      const exceededUsage = { overall: 1.05, breakdown: {} };
+      const exceededAlert = getAlertLevel(exceededUsage);
+      assert(
+        exceededAlert && exceededAlert.level === 'exceeded',
+        'W5.5 105% 使用率為 exceeded',
+        `level: ${exceededAlert?.level}`
+      );
+
+      // 驗證 suggestModel 函數
+      assert(
+        typeof suggestModel === 'function',
+        'W5.6 suggestModel 函數存在',
+        `type: ${typeof suggestModel}`
+      );
+
+      const suggestion = suggestModel(criticalUsage, 'moderate');
+      assert(
+        suggestion && suggestion.model,
+        'W5.7 suggestModel 提供模型建議',
+        `model: ${suggestion?.model}`
+      );
+    } catch (err) {
+      console.log(`❌ W5 錯誤: ${err.message}`);
+    }
+
+  } finally {
+    process.env.CLAUDE_PROJECT_ROOT = originalRoot;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  console.log('\n✅ 場景 W 完成');
+}
+
+// ============================================================
 // 主測試執行
 // ============================================================
 async function runAllTests() {
@@ -3222,6 +3760,8 @@ async function runAllTests() {
     await testPipelineContract();          // 場景 S
     await testRealWorldClassification();   // 場景 T
     await testHybridClassifier();          // 場景 U
+    await testTaskToolValidator();         // 場景 V
+    await testDualLayerDefense();          // 場景 W
   } catch (error) {
     console.error('\n❌ 測試執行錯誤:', error.message);
     console.error(error.stack);

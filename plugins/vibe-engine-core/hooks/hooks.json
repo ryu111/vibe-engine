@@ -39,8 +39,13 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|Bash",
+        "matcher": "Edit|Write|Bash|NotebookEdit",
         "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/routing-enforcer.js\"",
+            "timeout": 5
+          },
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/permission-guard.js\"",
@@ -52,13 +57,29 @@
             "timeout": 5
           }
         ],
-        "description": "檢查危險操作權限和預算"
+        "description": "強制路由委派、檢查危險操作權限和預算"
+      },
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/task-tool-validator.js\"",
+            "timeout": 5
+          }
+        ],
+        "description": "驗證 Task tool 的 agent type 符合路由計劃"
       }
     ],
     "PostToolUse": [
       {
         "matcher": "*",
         "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/routing-progress-tracker.js\"",
+            "timeout": 3
+          },
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/result-logger.js\"",
@@ -70,7 +91,7 @@
             "timeout": 5
           }
         ],
-        "description": "記錄工具執行結果並更新預算"
+        "description": "追蹤任務進度、記錄工具執行結果並更新預算"
       }
     ],
     "Stop": [

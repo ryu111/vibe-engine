@@ -650,16 +650,21 @@ async function main() {
         suppressOutput: false
       };
 
-      // 只在需要分解時添加系統訊息
+      // 只在需要分解時添加系統訊息（雙通道）
       if (shouldDecompose) {
         const subtaskCount = decomposition.task_decomposition.subtasks.length;
         const phaseCount = decomposition.task_decomposition.execution_order.total_phases;
         const agents = [...new Set(decomposition.task_decomposition.subtasks.map(t => t.agent))];
 
-        output.systemMessage = `[Vibe Engine] Task decomposed into ${subtaskCount} subtasks across ${phaseCount} phases.
+        const message = `[Vibe Engine] Task decomposed into ${subtaskCount} subtasks across ${phaseCount} phases.
 Agents: ${agents.join(', ')}
-Use the Task tool to execute subtasks in parallel where possible.
+MUST use the Task tool to delegate subtasks to the specified agents. Do NOT implement directly.
 Plan saved to: ${saveResult.filePath || 'memory'}`;
+        output.systemMessage = message;
+        output.hookSpecificOutput = {
+          hookEventName: 'UserPromptSubmit',
+          additionalContext: message
+        };
       }
 
       writeHookOutput(output);

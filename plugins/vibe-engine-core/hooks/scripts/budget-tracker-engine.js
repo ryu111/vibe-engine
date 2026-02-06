@@ -456,12 +456,21 @@ function preToolUseCheck(toolName, sessionId, budget, usage) {
     };
   }
 
-  // 危險操作在緊急狀態下警告
+  // 預算緊急（>= 90%）：強制阻擋高成本操作
   if (alert.level === 'critical' && ['Edit', 'Write', 'Bash'].includes(toolName)) {
+    const usagePercent = Math.round(budgetUsage.overall * 100);
+    if (usagePercent >= 90) {
+      return {
+        continue: false,
+        decision: 'block',
+        reason: `預算臨界 (${usagePercent}%)。必須切換至 Haiku 模型或結束任務。`,
+        suggested_model: 'haiku'
+      };
+    }
     return {
       continue: true,
       decision: 'warn',
-      reason: `預算緊急 (${Math.round(budgetUsage.overall * 100)}%)。建議完成當前步驟後暫停。`,
+      reason: `預算緊急 (${usagePercent}%)。建議完成當前步驟後暫停。`,
       suggested_model: 'haiku'
     };
   }

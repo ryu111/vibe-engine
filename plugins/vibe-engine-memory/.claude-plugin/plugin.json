@@ -1,6 +1,6 @@
 {
   "name": "vibe-engine-memory",
-  "version": "0.6.8",
+  "version": "0.6.9",
   "description": "Vibe Engine 記憶模組 - 三層記憶架構、Confidence Scoring、Instinct Learning",
   "author": {
     "name": "Vibe Engine Team"
