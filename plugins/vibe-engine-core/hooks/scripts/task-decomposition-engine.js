@@ -605,13 +605,21 @@ async function main() {
     let prompt = '';
     let classificationResult = null;
 
-    if (hookInput?.user_prompt) {
-      prompt = hookInput.user_prompt;
+    // 優先 user_prompt，fallback 到 prompt（Claude Code 可能使用任一欄位名）
+    const userPrompt = hookInput?.user_prompt || hookInput?.prompt;
+    if (userPrompt) {
+      prompt = userPrompt;
       // 從共享檔案讀取 prompt-classifier 的分類結果
       const paths = getVibeEnginePaths();
       classificationResult = safeReadJSON(path.join(paths.root, 'last-classification.json'));
     } else if (rawInput) {
-      prompt = rawInput;
+      // rawInput 可能是完整 hookInput JSON — 嘗試提取 user_prompt
+      try {
+        const parsed = JSON.parse(rawInput);
+        prompt = parsed.user_prompt || parsed.prompt || rawInput;
+      } catch {
+        prompt = rawInput;
+      }
     }
 
     // 如果沒有 prompt，從命令列參數讀取

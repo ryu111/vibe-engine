@@ -505,7 +505,8 @@ async function main() {
     suggestedAgent: null
   });
 
-  const userPrompt = hookInput?.user_prompt || '';
+  // 優先 user_prompt，fallback 到 prompt（Claude Code 可能使用任一欄位名）
+  const userPrompt = hookInput?.user_prompt || hookInput?.prompt || '';
 
   // 檢查是否應該直接回答
   if (shouldDirectResponse(userPrompt, classification)) {
@@ -532,10 +533,15 @@ async function main() {
       systemMessage = `[Agent Router] Routing to ${suggestedAgent} agent for this request.`;
     }
 
+    // 同時使用 systemMessage 和 hookSpecificOutput.additionalContext 確保指令傳達
     console.log(JSON.stringify({
       continue: true,
       suppressOutput: false,
-      systemMessage
+      systemMessage,
+      hookSpecificOutput: {
+        hookEventName: 'UserPromptSubmit',
+        additionalContext: systemMessage
+      }
     }));
     return;
   }
@@ -559,11 +565,15 @@ async function main() {
   // 生成強制執行指令（新版）
   const directive = generateRoutingDirective(plan, planId, userPrompt);
 
-  // 輸出結果
+  // 同時使用 systemMessage 和 hookSpecificOutput.additionalContext 確保指令傳達
   console.log(JSON.stringify({
     continue: true,
     suppressOutput: false,
-    systemMessage: directive
+    systemMessage: directive,
+    hookSpecificOutput: {
+      hookEventName: 'UserPromptSubmit',
+      additionalContext: directive
+    }
   }));
 }
 

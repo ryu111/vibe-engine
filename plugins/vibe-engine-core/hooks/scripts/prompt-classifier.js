@@ -45,7 +45,8 @@ const INDICATORS = {
       '修復', '修正', '更新', '修改', '添加', '新增', '改變', '改進',
       '測試', '重命名', '刪除', '移除', '編輯', '調整', '除錯',
       '優化', '清理', '格式化',
-      '加入', '加上', '增加', '補上', '換成', '改成'
+      '加入', '加上', '增加', '補上', '換成', '改成',
+      '做', '寫', '弄', '改'
     ],
     patterns: [/^\/verify/, /^\/spec/]
   },
@@ -56,14 +57,17 @@ const INDICATORS = {
       'implement', 'build', 'create', 'develop', 'design', 'architect',
       'refactor', 'migrate', 'integrate', 'multiple files', 'rewrite',
       'restructure', 'overhaul', 'setup', 'configure', 'deploy',
-      'full', 'complete', 'entire', 'whole', 'all'
+      'full', 'complete', 'entire', 'whole', 'all', 'game', 'app',
+      'website', 'application', 'system', 'platform', 'service'
     ],
     zh: [
       '實現', '實作', '建立', '創建', '開發', '設計', '架構',
       '重構', '遷移', '整合', '多個檔案', '重寫', '重建',
-      '改造', '設置', '配置', '部署', '完整', '全部', '整個'
+      '改造', '設置', '配置', '部署', '完整', '全部', '整個',
+      '做一個', '寫一個', '製作', '幫我做', '幫我寫', '幫我建',
+      '遊戲', '應用', '網站', '系統', '平台', '服務'
     ],
-    patterns: [/多個/, /multiple/i, /all files/i, /整個專案/]
+    patterns: [/多個/, /multiple/i, /all files/i, /整個專案/, /做一個.+/]
   }
 };
 
@@ -293,7 +297,8 @@ function main() {
   process.stdin.on('end', () => {
     try {
       const hookInput = JSON.parse(input);
-      const userPrompt = hookInput.user_prompt || '';
+      // 優先 user_prompt，fallback 到 prompt（Claude Code 可能使用任一欄位名）
+      const userPrompt = hookInput.user_prompt || hookInput.prompt || '';
 
       // 分類請求
       const classification = classifyRequest(userPrompt);

@@ -197,11 +197,11 @@ async function main() {
     return;
   }
 
-  // 生成強制繼續指令
+  // 生成強制繼續指令 — 用 continue: false 實際阻擋 Claude 停止
   const continueDirective = generateContinueDirective(pendingTasks, planId, retryInfo);
 
   writeHookOutput({
-    continue: true,
+    continue: false,
     suppressOutput: false,
     systemMessage: continueDirective
   });
