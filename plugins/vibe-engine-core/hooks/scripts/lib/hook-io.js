@@ -127,17 +127,20 @@ function buildSuccessOutput(options = {}) {
     continue: shouldContinue = true,
     suppressOutput = false,
     systemMessage = null,
-    hookSpecificOutput = {}
+    hookSpecificOutput = null
   } = options;
 
   const output = {
     continue: shouldContinue,
-    suppressOutput,
-    hookSpecificOutput
+    suppressOutput
   };
 
   if (systemMessage) {
     output.systemMessage = systemMessage;
+  }
+
+  if (hookSpecificOutput && Object.keys(hookSpecificOutput).length > 0) {
+    output.hookSpecificOutput = hookSpecificOutput;
   }
 
   return output;
@@ -152,7 +155,7 @@ function buildSuccessOutput(options = {}) {
 function buildErrorOutput(message, shouldContinue = true) {
   return {
     continue: shouldContinue,
-    error: message
+    suppressOutput: true
   };
 }
 

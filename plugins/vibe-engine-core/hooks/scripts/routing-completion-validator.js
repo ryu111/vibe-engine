@@ -148,10 +148,7 @@ async function main() {
   if (!routingManager.hasActivePlan()) {
     // 沒有活躍計劃，正常繼續
     writeHookOutput(buildSuccessOutput({
-      suppressOutput: true,
-      hookSpecificOutput: {
-        routingValidation: 'no_active_plan'
-      }
+      suppressOutput: true
     }));
     return;
   }
@@ -166,11 +163,7 @@ async function main() {
     routingManager.markPlanCompleted();
     writeHookOutput(buildSuccessOutput({
       suppressOutput: false,
-      systemMessage: `✅ Routing plan ${planId} completed successfully.`,
-      hookSpecificOutput: {
-        routingValidation: 'completed',
-        planId
-      }
+      systemMessage: `✅ Routing plan ${planId} completed successfully.`
     }));
     return;
   }
@@ -183,11 +176,7 @@ async function main() {
     routingManager.markPlanCompleted();
     writeHookOutput(buildSuccessOutput({
       suppressOutput: false,
-      systemMessage: `✅ All routing tasks completed for plan ${planId}.`,
-      hookSpecificOutput: {
-        routingValidation: 'completed',
-        planId
-      }
+      systemMessage: `✅ All routing tasks completed for plan ${planId}.`
     }));
     return;
   }
@@ -201,15 +190,9 @@ async function main() {
     const failureReport = generateFailureReport(pendingTasks, planId, retryInfo);
 
     writeHookOutput({
-      continue: true,  // 允許結束，但報告失敗
+      continue: true,
       suppressOutput: false,
-      systemMessage: failureReport,
-      hookSpecificOutput: {
-        routingValidation: 'failed',
-        planId,
-        reason: 'max_retries_exceeded',
-        pendingCount: pendingTasks.length
-      }
+      systemMessage: failureReport
     });
     return;
   }
@@ -218,16 +201,9 @@ async function main() {
   const continueDirective = generateContinueDirective(pendingTasks, planId, retryInfo);
 
   writeHookOutput({
-    continue: true,  // 繼續執行
+    continue: true,
     suppressOutput: false,
-    systemMessage: continueDirective,
-    hookSpecificOutput: {
-      routingValidation: 'incomplete',
-      planId,
-      pendingCount: pendingTasks.length,
-      retry: retryInfo.currentRetry,
-      maxRetries: retryInfo.maxRetries
-    }
+    systemMessage: continueDirective
   });
 }
 
@@ -240,11 +216,12 @@ module.exports = {
 };
 
 // 執行
-main().catch(err => {
-  console.error('[Routing Validator Error]', err.message);
-  console.log(JSON.stringify({
-    continue: true,
-    suppressOutput: true,
-    error: err.message
-  }));
-});
+if (require.main === module) {
+  main().catch(err => {
+    console.error('[Routing Validator Error]', err.message);
+    console.log(JSON.stringify({
+      continue: true,
+      suppressOutput: true
+    }));
+  });
+}

@@ -299,8 +299,7 @@ function main() {
       // 輸出分類結果
       const output = {
         continue: true,
-        suppressOutput: false,
-        hookSpecificOutput: classification
+        suppressOutput: false
       };
 
       // 只在複雜請求時添加系統訊息
@@ -313,11 +312,7 @@ function main() {
     } catch (error) {
       console.log(JSON.stringify({
         continue: true,
-        suppressOutput: false,
-        hookSpecificOutput: {
-          complexity: 'unknown',
-          error: error.message
-        }
+        suppressOutput: false
       }));
     }
   });

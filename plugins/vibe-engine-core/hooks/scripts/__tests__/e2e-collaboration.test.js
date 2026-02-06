@@ -959,28 +959,29 @@ async function testHookChainPipeline() {
       `output: ${JSON.stringify(step1)?.substring(0, 100)}`
     );
 
+    // 直接測試分類邏輯
+    const classification = classifyRequest(triggerPrompt);
     assert(
-      step1.hookSpecificOutput?.complexity === 'moderate',
+      classification.complexity === 'moderate',
       'H1.2 觸發詞分類為 moderate',
-      `complexity: ${step1?.hookSpecificOutput?.complexity}`
+      `complexity: ${classification?.complexity}`
     );
 
     assert(
-      step1.hookSpecificOutput.requestType === 'action' || step1.hookSpecificOutput.requestType === 'multi-step',
+      classification.requestType === 'action' || classification.requestType === 'multi-step',
       'H1.3 requestType 為 action 或 multi-step',
-      `requestType: ${step1?.hookSpecificOutput?.requestType}`
+      `requestType: ${classification?.requestType}`
     );
 
     assert(
-      step1.hookSpecificOutput?.needsDecomposition === true,
+      classification.needsDecomposition === true,
       'H1.4 觸發詞 needsDecomposition 為 true',
-      `needsDecomposition: ${step1?.hookSpecificOutput?.needsDecomposition}`
+      `needsDecomposition: ${classification?.needsDecomposition}`
     );
 
-    console.log('\n📋 Step 2: task-decomposition-engine（進程執行，接收分類結果）');
+    console.log('\n📋 Step 2: task-decomposition-engine（進程執行）');
     const step2 = runHookScript('task-decomposition-engine.js', {
-      user_prompt: triggerPrompt,
-      hookSpecificOutput: step1.hookSpecificOutput
+      user_prompt: triggerPrompt
     }, hookEnv);
 
     assert(
@@ -990,15 +991,14 @@ async function testHookChainPipeline() {
     );
 
     assert(
-      step2.hookSpecificOutput?.decomposition?.task_decomposition?.subtasks?.length >= 2,
-      'H2.2 分解出 2+ 子任務',
-      `subtasks: ${step2?.hookSpecificOutput?.decomposition?.task_decomposition?.subtasks?.length}`
+      step2.systemMessage && step2.systemMessage.includes('subtasks'),
+      'H2.2 systemMessage 包含任務分解資訊',
+      `systemMessage: ${step2?.systemMessage?.substring(0, 80)}`
     );
 
-    console.log('\n📋 Step 3: agent-router（進程執行，接收分解結果）');
+    console.log('\n📋 Step 3: agent-router（進程執行）');
     const step3 = runHookScript('agent-router.js', {
-      user_prompt: triggerPrompt,
-      hookSpecificOutput: step2.hookSpecificOutput
+      user_prompt: triggerPrompt
     }, hookEnv);
 
     assert(
@@ -1014,9 +1014,9 @@ async function testHookChainPipeline() {
     );
 
     assert(
-      step3.hookSpecificOutput?.isDirective === true && step3.hookSpecificOutput?.planId,
-      'H3.3 輸出包含 isDirective=true 和 planId',
-      `isDirective: ${step3?.hookSpecificOutput?.isDirective}, planId: ${step3?.hookSpecificOutput?.planId}`
+      step3.systemMessage && step3.systemMessage.includes('MANDATORY'),
+      'H3.3 systemMessage 包含 MANDATORY 路由指令',
+      `has plan: ${step3?.systemMessage?.includes('Plan')}`
     );
 
     // ── H1.5: completion-check（活躍路由 → deferred）──
@@ -1033,9 +1033,9 @@ async function testHookChainPipeline() {
     );
 
     assert(
-      step3a.hookSpecificOutput?.completionCheck === 'deferred',
-      'H3a.2 有活躍路由時 completion-check 延遲到 routing-completion-validator',
-      `completionCheck: ${step3a?.hookSpecificOutput?.completionCheck}`
+      step3a.suppressOutput === true,
+      'H3a.2 有活躍路由時 completion-check 靜默延遲',
+      `suppressOutput: ${step3a?.suppressOutput}`
     );
 
     // ── H2: Stop 鏈 — 活躍路由時跳過驗證 ──
@@ -1079,10 +1079,11 @@ async function testHookChainPipeline() {
       user_prompt: '什麼是 REST API？'
     }, hookEnv);
 
+    const simpleClassification = classifyRequest('什麼是 REST API？');
     assert(
-      simpleQuery?.hookSpecificOutput?.complexity === 'simple',
+      simpleClassification.complexity === 'simple',
       'H6.1 簡單查詢分類為 simple',
-      `complexity: ${simpleQuery?.hookSpecificOutput?.complexity}`
+      `complexity: ${simpleClassification?.complexity}`
     );
 
   } finally {
@@ -1225,16 +1226,17 @@ async function testClassifierAccuracy() {
       user_prompt: '幫我在 test-projects/phone-login 專案中加入忘記密碼功能，要有 UI 和驗證邏輯'
     }, hookEnv);
 
+    const step6Classification = classifyRequest('幫我在 test-projects/phone-login 專案中加入忘記密碼功能，要有 UI 和驗證邏輯');
     assert(
-      step6?.hookSpecificOutput?.complexity === 'moderate',
+      step6Classification.complexity === 'moderate',
       'I6.1 觸發詞進程執行結果為 moderate',
-      `complexity: ${step6?.hookSpecificOutput?.complexity}`
+      `complexity: ${step6Classification?.complexity}`
     );
 
     assert(
-      step6?.hookSpecificOutput?.needsDecomposition === true,
+      step6Classification.needsDecomposition === true,
       'I6.2 觸發詞 needsDecomposition 為 true',
-      `needsDecomposition: ${step6?.hookSpecificOutput?.needsDecomposition}`
+      `needsDecomposition: ${step6Classification?.needsDecomposition}`
     );
 
   } finally {
@@ -1421,9 +1423,9 @@ async function testGapFixes() {
     );
 
     assert(
-      ccResult.hookSpecificOutput?.completionCheck !== undefined,
-      'J6.2 hookSpecificOutput 包含 completionCheck 欄位',
-      `keys: ${Object.keys(ccResult?.hookSpecificOutput || {}).join(', ')}`
+      ccResult.systemMessage && ccResult.systemMessage.includes('[Completion Summary]'),
+      'J6.2 completion-check 聚合摘要',
+      `systemMessage: ${ccResult?.systemMessage?.substring(0, 60)}`
     );
 
   } finally {
@@ -1983,12 +1985,10 @@ async function testCrossChainState() {
     console.log('📋 P1-P3: UserPromptSubmit → routing-state.json');
     const step1 = runHookScript('prompt-classifier.js', { user_prompt: triggerPrompt }, hookEnv);
     const step2 = runHookScript('task-decomposition-engine.js', {
-      user_prompt: triggerPrompt,
-      hookSpecificOutput: step1.hookSpecificOutput
+      user_prompt: triggerPrompt
     }, hookEnv);
     const step3 = runHookScript('agent-router.js', {
-      user_prompt: triggerPrompt,
-      hookSpecificOutput: step2.hookSpecificOutput
+      user_prompt: triggerPrompt
     }, hookEnv);
 
     const routingStatePath = path.join(vibeDir, 'routing-state.json');
@@ -2007,9 +2007,9 @@ async function testCrossChainState() {
     );
 
     assert(
-      step3?.hookSpecificOutput?.isDirective === true,
-      'P3 agent-router 生成 isDirective 指令',
-      `isDirective: ${step3?.hookSpecificOutput?.isDirective}`
+      step3?.systemMessage && step3.systemMessage.includes('MANDATORY'),
+      'P3 agent-router 生成 MANDATORY 指令',
+      `has MANDATORY: ${step3?.systemMessage?.includes('MANDATORY')}`
     );
 
     // ── P4-P5: 活躍 routing → Stop hooks defer/fast-path ──
@@ -2019,9 +2019,9 @@ async function testCrossChainState() {
       reason: 'stop'
     }, hookEnv);
     assert(
-      ccResult?.hookSpecificOutput?.completionCheck === 'deferred',
+      ccResult?.suppressOutput === true,
       'P4 completion-check defers（活躍 routing）',
-      `completionCheck: ${ccResult?.hookSpecificOutput?.completionCheck}`
+      `suppressOutput: ${ccResult?.suppressOutput}`
     );
 
     const veResult = runHookScript('verification-engine.js', {
@@ -2042,9 +2042,9 @@ async function testCrossChainState() {
       reason: 'stop'
     }, hookEnv);
     assert(
-      ccResult2?.hookSpecificOutput?.completionCheck !== 'deferred',
+      ccResult2?.systemMessage && ccResult2.systemMessage.includes('[Completion Summary]'),
       'P6 completion-check aggregates（routing 已清除）',
-      `completionCheck: ${ccResult2?.hookSpecificOutput?.completionCheck}`
+      `systemMessage: ${ccResult2?.systemMessage?.substring(0, 60)}`
     );
 
     // ── P7: auto-fix 活躍 → completion-check defers ──
@@ -2058,9 +2058,9 @@ async function testCrossChainState() {
       reason: 'stop'
     }, hookEnv);
     assert(
-      ccResult3?.hookSpecificOutput?.completionCheck === 'deferred',
+      ccResult3?.suppressOutput === true,
       'P7 auto-fix active → completion-check defers',
-      `completionCheck: ${ccResult3?.hookSpecificOutput?.completionCheck}`
+      `suppressOutput: ${ccResult3?.suppressOutput}`
     );
 
     // ── P8: routing + auto-fix 同時活躍 ──
@@ -2074,9 +2074,9 @@ async function testCrossChainState() {
       reason: 'stop'
     }, hookEnv);
     assert(
-      ccResult4?.hookSpecificOutput?.completionCheck === 'deferred',
+      ccResult4?.suppressOutput === true,
       'P8 routing + auto-fix 同時活躍 → deferred',
-      `completionCheck: ${ccResult4?.hookSpecificOutput?.completionCheck}`
+      `suppressOutput: ${ccResult4?.suppressOutput}`
     );
 
     // ── P9-P10: Budget 閾值邏輯 ──
@@ -2315,24 +2315,24 @@ async function testFullLifecycle() {
     console.log('📋 R1-R3: UserPromptSubmit 管道');
     const prompt = '幫我建立用戶認證 API，要有登入、註冊和測試';
     const s1 = runHookScript('prompt-classifier.js', { user_prompt: prompt }, hookEnv);
+    const r1Classification = classifyRequest(prompt);
     assert(
-      s1?.hookSpecificOutput?.needsDecomposition === true,
+      r1Classification.needsDecomposition === true,
       'R1 prompt-classifier → needsDecomposition',
-      `needsDecomposition: ${s1?.hookSpecificOutput?.needsDecomposition}`
+      `needsDecomposition: ${r1Classification?.needsDecomposition}`
     );
 
     const s2 = runHookScript('task-decomposition-engine.js', {
-      user_prompt: prompt, hookSpecificOutput: s1.hookSpecificOutput
+      user_prompt: prompt
     }, hookEnv);
-    const subtasks = s2?.hookSpecificOutput?.decomposition?.task_decomposition?.subtasks;
     assert(
-      subtasks && subtasks.length >= 3,
-      'R2 task-decomposition → 3+ subtasks',
-      `count: ${subtasks?.length}`
+      s2?.systemMessage && s2.systemMessage.includes('subtasks'),
+      'R2 task-decomposition → subtasks',
+      `systemMessage: ${s2?.systemMessage?.substring(0, 60)}`
     );
 
     const s3 = runHookScript('agent-router.js', {
-      user_prompt: prompt, hookSpecificOutput: s2.hookSpecificOutput
+      user_prompt: prompt
     }, hookEnv);
     assert(
       s3?.systemMessage && s3.systemMessage.includes('MANDATORY'),
@@ -2377,9 +2377,9 @@ async function testFullLifecycle() {
       reason: 'stop'
     }, hookEnv);
     assert(
-      ccStop1?.hookSpecificOutput?.completionCheck === 'deferred',
+      ccStop1?.suppressOutput === true,
       'R6 Stop: completion-check defers（routing 活躍）',
-      `completionCheck: ${ccStop1?.hookSpecificOutput?.completionCheck}`
+      `suppressOutput: ${ccStop1?.suppressOutput}`
     );
 
     const veStop1 = runHookScript('verification-engine.js', {
@@ -2404,9 +2404,9 @@ async function testFullLifecycle() {
       reason: 'stop'
     }, hookEnv);
     assert(
-      ccStop2?.hookSpecificOutput?.completionCheck !== 'deferred',
+      ccStop2?.systemMessage && ccStop2.systemMessage.includes('[Completion Summary]'),
       'R8 completion-check aggregates（routing 完成）',
-      `completionCheck: ${ccStop2?.hookSpecificOutput?.completionCheck}`
+      `systemMessage: ${ccStop2?.systemMessage?.substring(0, 60)}`
     );
 
     // ── R9: memory-consolidation 處理觀察 ──

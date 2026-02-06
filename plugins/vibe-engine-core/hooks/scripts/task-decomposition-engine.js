@@ -618,7 +618,7 @@ async function main() {
     }
 
     if (!prompt) {
-      writeHookOutput({ continue: true, error: 'No prompt provided' });
+      writeHookOutput({ continue: true, suppressOutput: true });
       return;
     }
 
@@ -637,12 +637,7 @@ async function main() {
 
       const output = {
         continue: true,
-        suppressOutput: false,
-        hookSpecificOutput: {
-          decomposition,
-          taskCommands,
-          savedTo: saveResult.success ? saveResult.filePath : null
-        }
+        suppressOutput: false
       };
 
       // 只在需要分解時添加系統訊息
@@ -688,7 +683,7 @@ Plan saved to: ${saveResult.filePath || 'memory'}`;
     }
 
   } catch (error) {
-    writeHookOutput({ continue: true, error: error.message });
+    writeHookOutput({ continue: true, suppressOutput: true });
   }
 }
 
@@ -706,4 +701,6 @@ module.exports = {
 };
 
 // 執行主函數
-main().catch(console.error);
+if (require.main === module) {
+  main().catch(console.error);
+}

@@ -238,12 +238,7 @@ async function main() {
   // 輸出 hook 結果
   console.log(JSON.stringify({
     continue: true,
-    suppressOutput: true,
-    hookSpecificOutput: {
-      notificationSent: success,
-      planId: state.planId,
-      status: state.status
-    }
+    suppressOutput: true
   }));
 }
 

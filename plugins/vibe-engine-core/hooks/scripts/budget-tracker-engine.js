@@ -573,11 +573,7 @@ function buildPostToolUseOutput(usage, budget, complexity) {
 
   const output = {
     continue: alert.level !== 'exceeded',
-    suppressOutput: false,
-    hookSpecificOutput: {
-      budget_status: `${usagePercent}%`,
-      alert_level: alert.level
-    }
+    suppressOutput: false
   };
 
   // 使用 lib/alerts.js 的格式化函數
@@ -619,7 +615,7 @@ async function main() {
     }
 
   } catch (error) {
-    console.log(JSON.stringify({ continue: true, error: error.message }));
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
   }
 }
 

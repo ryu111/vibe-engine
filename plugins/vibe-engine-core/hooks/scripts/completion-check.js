@@ -126,11 +126,7 @@ async function main() {
   if (deferResult.defer) {
     writeHookOutput(buildSuccessOutput({
       suppressOutput: true,
-      hookSpecificOutput: {
-        completionCheck: 'deferred',
-        reason: deferResult.reason,
-        handler: deferResult.handler
-      }
+      systemMessage: `Active routing plan detected — deferring to ${deferResult.handler}`
     }));
     return;
   }
@@ -138,11 +134,7 @@ async function main() {
   const completionMessage = generateCompletionSummary(summary);
 
   writeHookOutput(buildSuccessOutput({
-    systemMessage: completionMessage,
-    hookSpecificOutput: {
-      completionCheck: 'aggregated',
-      summary
-    }
+    systemMessage: completionMessage
   }));
 }
 
@@ -157,8 +149,7 @@ module.exports = {
 if (require.main === module) {
   main().catch(err => {
     writeHookOutput(buildSuccessOutput({
-      suppressOutput: true,
-      hookSpecificOutput: { completionCheck: 'error', error: err.message }
+      suppressOutput: true
     }));
   });
 }

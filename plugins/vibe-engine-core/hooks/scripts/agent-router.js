@@ -512,15 +512,10 @@ async function main() {
 
   // 檢查是否應該直接回答
   if (shouldDirectResponse(userPrompt, classification)) {
-    const output = {
+    console.log(JSON.stringify({
       continue: true,
-      suppressOutput: true,  // 簡單請求不輸出路由計劃
-      hookSpecificOutput: {
-        routing: 'direct',
-        reason: 'Simple request, no delegation needed'
-      }
-    };
-    console.log(JSON.stringify(output));
+      suppressOutput: true
+    }));
     return;
   }
 
@@ -540,17 +535,11 @@ async function main() {
       systemMessage = `[Agent Router] Routing to ${suggestedAgent} agent for this request.`;
     }
 
-    const output = {
+    console.log(JSON.stringify({
       continue: true,
       suppressOutput: false,
-      systemMessage,
-      hookSpecificOutput: {
-        routing: 'single',
-        agent: suggestedAgent,
-        needsDecomposition: isComplex
-      }
-    };
-    console.log(JSON.stringify(output));
+      systemMessage
+    }));
     return;
   }
 
@@ -558,15 +547,10 @@ async function main() {
   const plan = generateRoutingPlan(taskDecomposition, classification);
 
   if (!plan) {
-    const output = {
+    console.log(JSON.stringify({
       continue: true,
-      suppressOutput: true,
-      hookSpecificOutput: {
-        routing: 'direct',
-        reason: 'Could not generate routing plan'
-      }
-    };
-    console.log(JSON.stringify(output));
+      suppressOutput: true
+    }));
     return;
   }
 
@@ -579,22 +563,11 @@ async function main() {
   const directive = generateRoutingDirective(plan, planId, userPrompt);
 
   // 輸出結果
-  const output = {
+  console.log(JSON.stringify({
     continue: true,
     suppressOutput: false,
-    systemMessage: directive,
-    hookSpecificOutput: {
-      routing: plan.strategy,
-      planId: planId,
-      phases: plan.phases.length,
-      agents: plan.agents,
-      estimatedCost: plan.estimatedCost,
-      totalTasks: routingState.totalCount,
-      isDirective: true  // 標記這是強制指令
-    }
-  };
-
-  console.log(JSON.stringify(output));
+    systemMessage: directive
+  }));
 }
 
 // 導出供測試
@@ -609,4 +582,6 @@ module.exports = {
 };
 
 // 執行
-main().catch(console.error);
+if (require.main === module) {
+  main().catch(console.error);
+}
