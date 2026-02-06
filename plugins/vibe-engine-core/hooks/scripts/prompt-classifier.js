@@ -46,7 +46,7 @@ const INDICATORS = {
       '測試', '重命名', '刪除', '移除', '編輯', '調整', '除錯',
       '優化', '清理', '格式化',
       '加入', '加上', '增加', '補上', '換成', '改成',
-      '做', '寫', '弄', '改'
+      '做', '寫', '弄', '改', '加'
     ],
     patterns: [/^\/verify/, /^\/spec/]
   },
@@ -187,9 +187,11 @@ function classifyComplexity(prompt, metrics) {
   const scores = { simple: 0, moderate: 0, complex: 0 };
 
   for (const level of ['simple', 'moderate', 'complex']) {
-    // 英文指標（用 sanitized — 路徑已移除）
+    // 英文指標（用 sanitized — 路徑已移除 + word boundary 防 substring 誤報）
     for (const word of INDICATORS[level].en) {
-      if (lowerSanitized.includes(word)) scores[level] += 1;
+      // 用 word boundary regex 避免 "read" 匹配 "readme"、"test" 匹配 "testing"
+      const wordRegex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (wordRegex.test(lowerSanitized)) scores[level] += 1;
     }
     // 中文指標
     for (const word of INDICATORS[level].zh) {
@@ -207,8 +209,8 @@ function classifyComplexity(prompt, metrics) {
   if (metrics.compoundRequirements >= 2) scores.moderate += 1;
   if (metrics.compoundRequirements >= 3) scores.complex += 1.5;
 
-  // 5. 返回最高分級別
-  if (scores.complex > scores.moderate && scores.complex > scores.simple) {
+  // 5. 返回最高分級別（平手時優先 complex — 寧可多分解也不要漏掉）
+  if (scores.complex > 0 && scores.complex >= scores.moderate && scores.complex >= scores.simple) {
     return 'complex';
   }
   if (scores.simple > scores.moderate) {

@@ -21,6 +21,8 @@
  * P. 跨鏈狀態一致性（routing-state → completion-check/verification-engine、auto-fix state、budget）
  * Q. 跨 Plugin 進程管道（observation-collector、metrics-collector、circuit-breaker、permission-guard）
  * R. 完整生命週期模擬（UserPromptSubmit → PostToolUse → Stop → memory-consolidation）
+ * S. 管道契約測試（stdin/stdout 欄位名契約、hookSpecificOutput 雙通道、Stop 阻擋）
+ * T. 真實語料分類測試（34 條中文口語化 prompt 準確率 + 邊界案例 + 進程管道驗證）
  */
 
 const path = require('path');
@@ -2443,6 +2445,415 @@ async function testFullLifecycle() {
 }
 
 // ============================================================
+// 場景 S: 管道契約測試 — stdin/stdout 真實 I/O 契約驗證
+// ============================================================
+async function testPipelineContract() {
+  console.log('\n═══════════════════════════════════════');
+  console.log('場景 S: 管道契約測試（stdin/stdout 契約驗證）');
+  console.log('═══════════════════════════════════════\n');
+
+  const tempDir = path.join(__dirname, '.test-temp-s-' + Date.now());
+  const vibeDir = path.join(tempDir, '.vibe-engine');
+  fs.mkdirSync(path.join(vibeDir, 'tasks'), { recursive: true });
+
+  const originalRoot = process.env.CLAUDE_PROJECT_ROOT;
+  const hookEnv = {
+    CLAUDE_PROJECT_ROOT: tempDir,
+    CLAUDE_PLUGIN_ROOT: path.join(__dirname, '../..')
+  };
+  process.env.CLAUDE_PROJECT_ROOT = tempDir;
+
+  try {
+    // ── S1: 欄位名契約 — user_prompt vs prompt ──
+    console.log('📋 S1: 欄位名契約 — user_prompt vs prompt');
+
+    const testPrompt = '做一個待辦事項應用';
+
+    // user_prompt 欄位
+    const s1a = runHookScript('prompt-classifier.js', {
+      session_id: 'test-s1', cwd: tempDir,
+      hook_event_name: 'UserPromptSubmit',
+      user_prompt: testPrompt
+    }, hookEnv);
+
+    // prompt 欄位（Claude Code 可能使用）
+    const s1b = runHookScript('prompt-classifier.js', {
+      session_id: 'test-s1', cwd: tempDir,
+      hook_event_name: 'UserPromptSubmit',
+      prompt: testPrompt
+    }, hookEnv);
+
+    assert(
+      s1a && s1a.continue === true,
+      'S1.1 user_prompt 欄位：hook 執行成功',
+      `output: ${JSON.stringify(s1a)?.substring(0, 80)}`
+    );
+
+    assert(
+      s1b && s1b.continue === true,
+      'S1.2 prompt 欄位：hook 執行成功',
+      `output: ${JSON.stringify(s1b)?.substring(0, 80)}`
+    );
+
+    // 讀取寫入的 classification JSON — 兩者應產生相同分類
+    const classFile = path.join(vibeDir, 'last-classification.json');
+    const classA = JSON.parse(fs.readFileSync(classFile, 'utf8'));
+    assert(
+      classA.complexity === 'complex' && classA.prompt === testPrompt,
+      'S1.3 兩種欄位名產出相同分類結果（complex）',
+      `complexity: ${classA.complexity}, prompt: ${classA.prompt}`
+    );
+
+    // ── S2: task-decomposition 欄位名 fallback ──
+    console.log('\n📋 S2: task-decomposition 欄位名契約');
+
+    const s2a = runHookScript('task-decomposition-engine.js', {
+      session_id: 'test-s2', cwd: tempDir,
+      hook_event_name: 'UserPromptSubmit',
+      user_prompt: testPrompt
+    }, hookEnv);
+
+    const s2b = runHookScript('task-decomposition-engine.js', {
+      session_id: 'test-s2', cwd: tempDir,
+      hook_event_name: 'UserPromptSubmit',
+      prompt: testPrompt
+    }, hookEnv);
+
+    assert(
+      s2a && s2a.systemMessage && s2a.systemMessage.includes('subtasks'),
+      'S2.1 user_prompt 欄位：任務分解成功',
+      `systemMessage: ${s2a?.systemMessage?.substring(0, 60)}`
+    );
+
+    assert(
+      s2b && s2b.systemMessage && s2b.systemMessage.includes('subtasks'),
+      'S2.2 prompt 欄位：任務分解成功',
+      `systemMessage: ${s2b?.systemMessage?.substring(0, 60)}`
+    );
+
+    // 驗證 task YAML 中 original_request 不含 session_id
+    const taskFiles = fs.readdirSync(path.join(vibeDir, 'tasks')).filter(f => f.endsWith('.yaml'));
+    if (taskFiles.length > 0) {
+      const latestTask = fs.readFileSync(
+        path.join(vibeDir, 'tasks', taskFiles.sort().pop()), 'utf8'
+      );
+      assert(
+        !latestTask.includes('session_id'),
+        'S2.3 task YAML original_request 不含 session_id（已提取純 prompt）',
+        `contains session_id: ${latestTask.includes('session_id')}`
+      );
+    }
+
+    // ── S3: agent-router hookSpecificOutput 契約 ──
+    console.log('\n📋 S3: agent-router 輸出契約 — 雙通道驗證');
+
+    const s3 = runHookScript('agent-router.js', {
+      session_id: 'test-s3', cwd: tempDir,
+      hook_event_name: 'UserPromptSubmit',
+      user_prompt: testPrompt
+    }, hookEnv);
+
+    assert(
+      s3 && s3.systemMessage && s3.systemMessage.includes('MANDATORY'),
+      'S3.1 systemMessage 包含 MANDATORY 指令',
+      `has MANDATORY: ${s3?.systemMessage?.includes('MANDATORY')}`
+    );
+
+    assert(
+      s3 && s3.hookSpecificOutput && s3.hookSpecificOutput.hookEventName === 'UserPromptSubmit',
+      'S3.2 hookSpecificOutput.hookEventName === "UserPromptSubmit"',
+      `hookEventName: ${s3?.hookSpecificOutput?.hookEventName}`
+    );
+
+    assert(
+      s3 && s3.hookSpecificOutput && s3.hookSpecificOutput.additionalContext &&
+      s3.hookSpecificOutput.additionalContext.includes('MANDATORY'),
+      'S3.3 hookSpecificOutput.additionalContext 包含 MANDATORY 指令（雙通道）',
+      `has additionalContext: ${!!s3?.hookSpecificOutput?.additionalContext}`
+    );
+
+    assert(
+      s3 && s3.systemMessage === s3.hookSpecificOutput?.additionalContext,
+      'S3.4 systemMessage 與 additionalContext 內容一致',
+      `match: ${s3?.systemMessage === s3?.hookSpecificOutput?.additionalContext}`
+    );
+
+    // 驗證路由計劃包含正確任務數
+    assert(
+      s3 && s3.systemMessage && s3.systemMessage.includes('Total Tasks:'),
+      'S3.5 路由指令包含 Total Tasks 資訊',
+      `has Total Tasks: ${s3?.systemMessage?.includes('Total Tasks:')}`
+    );
+
+    // ── S4: routing-completion-validator continue:false 契約 ──
+    console.log('\n📋 S4: Stop hook continue:false 阻擋契約');
+
+    const s4 = runHookScript('routing-completion-validator.js', {
+      transcript_summary: '我完成了遊戲的基本框架',
+      reason: 'stop',
+      cwd: tempDir
+    }, hookEnv);
+
+    assert(
+      s4 && s4.continue === false,
+      'S4.1 有 pending tasks 時 continue === false（阻擋停止）',
+      `continue: ${s4?.continue}`
+    );
+
+    assert(
+      s4 && s4.systemMessage && s4.systemMessage.includes('ROUTING INCOMPLETE'),
+      'S4.2 阻擋訊息包含 ROUTING INCOMPLETE',
+      `has ROUTING INCOMPLETE: ${s4?.systemMessage?.includes('ROUTING INCOMPLETE')}`
+    );
+
+    assert(
+      s4 && s4.systemMessage && s4.systemMessage.includes('必須繼續執行'),
+      'S4.3 阻擋訊息包含中文指示',
+      `has 必須繼續: ${s4?.systemMessage?.includes('必須繼續執行')}`
+    );
+
+    // ── S5: 完整鏈路端到端 — 乾淨狀態重跑 ──
+    console.log('\n📋 S5: 完整 3-hook 鏈路端到端');
+
+    // 清理狀態重新開始
+    const cleanDir = path.join(__dirname, '.test-temp-s5-' + Date.now());
+    const cleanVibe = path.join(cleanDir, '.vibe-engine');
+    fs.mkdirSync(path.join(cleanVibe, 'tasks'), { recursive: true });
+
+    const cleanEnv = { CLAUDE_PROJECT_ROOT: cleanDir, CLAUDE_PLUGIN_ROOT: path.join(__dirname, '../..') };
+    process.env.CLAUDE_PROJECT_ROOT = cleanDir;
+
+    const chainPrompt = '幫我建一個完整的用戶認證系統，包含註冊和登入';
+    const chainInput = {
+      session_id: 'chain-test', cwd: cleanDir,
+      hook_event_name: 'UserPromptSubmit',
+      user_prompt: chainPrompt
+    };
+
+    // Step 1: classifier
+    const chain1 = runHookScript('prompt-classifier.js', chainInput, cleanEnv);
+    assert(chain1 && chain1.continue === true, 'S5.1 鏈路 Step1: classifier 成功', '');
+
+    // 驗證 classification 寫入
+    const chainClass = JSON.parse(fs.readFileSync(path.join(cleanVibe, 'last-classification.json'), 'utf8'));
+    assert(
+      chainClass.complexity === 'complex',
+      'S5.2 鏈路 Step1: 認證系統分類為 complex',
+      `complexity: ${chainClass.complexity}`
+    );
+
+    // Step 2: decomposition
+    const chain2 = runHookScript('task-decomposition-engine.js', chainInput, cleanEnv);
+    assert(
+      chain2 && chain2.systemMessage && chain2.systemMessage.includes('subtasks'),
+      'S5.3 鏈路 Step2: 任務分解成功',
+      `systemMessage: ${chain2?.systemMessage?.substring(0, 60)}`
+    );
+
+    // Step 3: router
+    const chain3 = runHookScript('agent-router.js', chainInput, cleanEnv);
+    assert(
+      chain3 && chain3.systemMessage && chain3.systemMessage.includes('MANDATORY'),
+      'S5.4 鏈路 Step3: 產出 MANDATORY 路由指令',
+      `has MANDATORY: ${chain3?.systemMessage?.includes('MANDATORY')}`
+    );
+
+    // 驗證路由狀態檔已建立
+    assert(
+      fs.existsSync(path.join(cleanVibe, 'routing-state.json')),
+      'S5.5 鏈路完成後 routing-state.json 已建立',
+      `exists: ${fs.existsSync(path.join(cleanVibe, 'routing-state.json'))}`
+    );
+
+    // Step 4: Stop hook 阻擋
+    const chain4 = runHookScript('routing-completion-validator.js', {
+      transcript_summary: '我先設計了架構', reason: 'stop', cwd: cleanDir
+    }, cleanEnv);
+    assert(
+      chain4 && chain4.continue === false,
+      'S5.6 鏈路 Step4: Stop hook 阻擋成功',
+      `continue: ${chain4?.continue}`
+    );
+
+    // 清理
+    fs.rmSync(cleanDir, { recursive: true, force: true });
+
+  } finally {
+    process.env.CLAUDE_PROJECT_ROOT = originalRoot;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  console.log('\n✅ 場景 S 完成');
+}
+
+// ============================================================
+// 場景 T: 真實語料分類測試 — 中文口語化 prompt 準確率驗證
+// ============================================================
+async function testRealWorldClassification() {
+  console.log('\n═══════════════════════════════════════');
+  console.log('場景 T: 真實語料分類測試');
+  console.log('═══════════════════════════════════════\n');
+
+  // 測試語料庫：來自真實情境的中文口語化 prompts
+  // 每個都包含預期分類結果
+  const testCorpus = [
+    // ── 應分類為 complex 的語料 ──
+    { prompt: '做一個單機版的植物大戰僵屍的小遊戲', expected: 'complex', label: '做一個遊戲' },
+    { prompt: '寫一個聊天機器人', expected: 'complex', label: '寫一個應用' },
+    { prompt: '幫我做一個待辦事項的網站', expected: 'complex', label: '做一個網站' },
+    { prompt: '製作一個簡單的計算機應用', expected: 'complex', label: '製作應用' },
+    { prompt: '幫我建一個 REST API 服務', expected: 'complex', label: '建一個服務' },
+    { prompt: '幫我寫一個爬蟲程式', expected: 'complex', label: '寫一個程式' },
+    { prompt: '開發一個會員管理系統', expected: 'complex', label: '開發系統' },
+    { prompt: '設計並實作一個購物車功能', expected: 'complex', label: '設計實作' },
+    { prompt: '重構整個專案的認證模組，需要修改多個檔案', expected: 'complex', label: '重構整個' },
+    { prompt: '建立一個完整的 CI/CD 部署流程', expected: 'complex', label: '建立完整' },
+    { prompt: '做一個 Chrome 擴充功能', expected: 'complex', label: '做擴充功能' },
+    { prompt: 'create a blog platform with user auth', expected: 'complex', label: 'create platform' },
+    { prompt: 'build a real-time chat application', expected: 'complex', label: 'build app' },
+    { prompt: 'implement a full authentication system', expected: 'complex', label: 'implement system' },
+
+    // ── 應分類為 moderate 的語料 ──
+    { prompt: '修復登入頁面的 bug', expected: 'moderate', label: '修復 bug' },
+    { prompt: '加一個 loading 動畫', expected: 'moderate', label: '加功能' },
+    { prompt: '把這個函數改成 async', expected: 'moderate', label: '改代碼' },
+    { prompt: '更新 README 的安裝步驟', expected: 'moderate', label: '更新文件' },
+    { prompt: '新增一個 API endpoint', expected: 'moderate', label: '新增端點' },
+    { prompt: '刪除沒用到的變數', expected: 'moderate', label: '刪除清理' },
+    { prompt: '優化這個查詢的效能', expected: 'moderate', label: '優化效能' },
+    { prompt: 'fix the typo in header component', expected: 'moderate', label: 'fix typo' },
+    { prompt: 'add a logout button', expected: 'moderate', label: 'add button' },
+    { prompt: 'update the error message', expected: 'moderate', label: 'update message' },
+
+    // ── 應分類為 simple 的語料 ──
+    { prompt: '什麼是 REST API？', expected: 'simple', label: '什麼是' },
+    { prompt: '解釋一下 Promise 的用法', expected: 'simple', label: '解釋' },
+    { prompt: 'how does async/await work?', expected: 'simple', label: 'how does' },
+    { prompt: '列出所有的 API 路由', expected: 'simple', label: '列出' },
+    { prompt: '這個 error 是什麼意思', expected: 'simple', label: '是什麼意思' },
+    { prompt: '幫我看一下這段程式碼', expected: 'simple', label: '看一下' },
+    { prompt: 'explain this function', expected: 'simple', label: 'explain' },
+    { prompt: 'what is the difference between let and const?', expected: 'simple', label: 'what is' },
+    { prompt: '/status', expected: 'simple', label: '/status 指令' },
+    { prompt: '/help', expected: 'simple', label: '/help 指令' },
+  ];
+
+  console.log('📋 T1: 分類準確率測試');
+  console.log(`語料庫大小: ${testCorpus.length} 條`);
+
+  let correct = 0;
+  let total = testCorpus.length;
+  const failures = [];
+
+  for (const testCase of testCorpus) {
+    const result = classifyRequest(testCase.prompt);
+    if (result.complexity === testCase.expected) {
+      correct++;
+    } else {
+      failures.push({
+        label: testCase.label,
+        prompt: testCase.prompt.substring(0, 30),
+        expected: testCase.expected,
+        actual: result.complexity
+      });
+    }
+  }
+
+  const accuracy = (correct / total * 100).toFixed(1);
+  console.log(`\n分類結果: ${correct}/${total}（${accuracy}%）`);
+
+  if (failures.length > 0) {
+    console.log('未通過案例:');
+    failures.forEach(f => console.log(`  - [${f.label}] "${f.prompt}..." expected=${f.expected} actual=${f.actual}`));
+  }
+
+  assert(
+    correct === total,
+    `T1.1 分類準確率 100%（${correct}/${total}）`,
+    `accuracy: ${accuracy}%, failures: ${failures.map(f => f.label).join(', ')}`
+  );
+
+  // ── T2: 邊界案例 — 不應誤分類 ──
+  console.log('\n📋 T2: 邊界案例測試');
+
+  // "做什麼" 是查詢，不是 complex
+  const edge1 = classifyRequest('這個函數做什麼');
+  assert(
+    edge1.complexity !== 'complex',
+    'T2.1 "做什麼" 不應分類為 complex',
+    `complexity: ${edge1.complexity}`
+  );
+
+  // 路徑中的關鍵字不應影響分類
+  const edge2 = classifyRequest('查看 game-server/build/output.log 的內容');
+  assert(
+    edge2.complexity === 'simple',
+    'T2.2 路徑含 game/build 的查詢仍為 simple',
+    `complexity: ${edge2.complexity}`
+  );
+
+  // 短 prompt 不應預設 complex
+  const edge3 = classifyRequest('Hi');
+  assert(
+    edge3.complexity !== 'complex',
+    'T2.3 極短 prompt 不應為 complex',
+    `complexity: ${edge3.complexity}`
+  );
+
+  // ── T3: needsDecomposition 契約 ──
+  console.log('\n📋 T3: needsDecomposition 契約');
+
+  const complexCases = testCorpus.filter(t => t.expected === 'complex');
+  let decompCount = 0;
+  for (const tc of complexCases) {
+    const r = classifyRequest(tc.prompt);
+    if (r.needsDecomposition) decompCount++;
+  }
+
+  assert(
+    decompCount === complexCases.length,
+    `T3.1 所有 complex 語料的 needsDecomposition 為 true（${decompCount}/${complexCases.length}）`,
+    `count: ${decompCount}/${complexCases.length}`
+  );
+
+  // ── T4: 進程管道語料驗證 — 口語化 prompt 也能通過真實 stdin ──
+  console.log('\n📋 T4: 進程管道語料驗證');
+
+  const tempDirT = path.join(__dirname, '.test-temp-t-' + Date.now());
+  const vibeDirT = path.join(tempDirT, '.vibe-engine');
+  fs.mkdirSync(path.join(vibeDirT, 'tasks'), { recursive: true });
+  const envT = { CLAUDE_PROJECT_ROOT: tempDirT, CLAUDE_PLUGIN_ROOT: path.join(__dirname, '../..') };
+  process.env.CLAUDE_PROJECT_ROOT = tempDirT;
+
+  // 用真實進程測試幾個關鍵語料
+  const pipeTestCases = [
+    { prompt: '做一個單機版的植物大戰僵屍的小遊戲', expectedComplex: true },
+    { prompt: '修復登入頁面的 bug', expectedComplex: false },
+    { prompt: '什麼是 TypeScript？', expectedComplex: false },
+  ];
+
+  for (let i = 0; i < pipeTestCases.length; i++) {
+    const tc = pipeTestCases[i];
+    const pipeResult = runHookScript('prompt-classifier.js', {
+      session_id: `pipe-t4-${i}`, cwd: tempDirT,
+      hook_event_name: 'UserPromptSubmit',
+      user_prompt: tc.prompt
+    }, envT);
+
+    const hasComplexMsg = pipeResult?.systemMessage?.includes('Complex request');
+    assert(
+      tc.expectedComplex ? hasComplexMsg : !hasComplexMsg,
+      `T4.${i + 1} 進程管道: "${tc.prompt.substring(0, 15)}..." ${tc.expectedComplex ? '→ complex' : '→ 非 complex'}`,
+      `systemMessage: ${pipeResult?.systemMessage?.substring(0, 50) || '(none)'}`
+    );
+  }
+
+  fs.rmSync(tempDirT, { recursive: true, force: true });
+
+  console.log('\n✅ 場景 T 完成');
+}
+
+// ============================================================
 // 主測試執行
 // ============================================================
 async function runAllTests() {
@@ -2470,6 +2881,8 @@ async function runAllTests() {
     await testCrossChainState();           // 場景 P
     await testCrossPluginPipeline();       // 場景 Q
     await testFullLifecycle();             // 場景 R
+    await testPipelineContract();          // 場景 S
+    await testRealWorldClassification();   // 場景 T
   } catch (error) {
     console.error('\n❌ 測試執行錯誤:', error.message);
     console.error(error.stack);
