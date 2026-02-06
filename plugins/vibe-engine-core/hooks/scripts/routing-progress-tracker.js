@@ -109,7 +109,7 @@ function areAllTasksDone(state) {
  */
 function trackTaskCompletion(hookInput) {
   // 1. 只處理 Task tool
-  if (hookInput.tool_name !== 'Task') {
+  if ((hookInput.tool_name || '').toLowerCase() !== 'task') {
     return null;
   }
 

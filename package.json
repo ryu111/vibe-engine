@@ -1,0 +1,27 @@
+{
+  "name": "vibe-engine",
+  "version": "1.0.0",
+  "description": "> 從 Vibe Coding 進化到 Vibe Engineering 的基礎設施",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ryu111/vibe-engine.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/ryu111/vibe-engine/issues"
+  },
+  "homepage": "https://github.com/ryu111/vibe-engine#readme",
+  "devDependencies": {
+    "jest": "^30.2.0"
+  }
+}

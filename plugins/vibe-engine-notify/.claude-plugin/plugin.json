@@ -1,6 +1,6 @@
 {
   "name": "vibe-engine-notify",
-  "version": "0.6.12",
+  "version": "0.6.13",
   "description": "Vibe Engine 通知模組 - Telegram 任務完成通知",
   "author": {
     "name": "Vibe Engine Team"

@@ -122,6 +122,32 @@
         "description": "驗證任務完成、執行自動化驗證、更新進度文檔"
       }
     ],
+    "SubagentStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/subagent-lifecycle.js\" start",
+            "timeout": 3
+          }
+        ],
+        "description": "註冊 SubAgent 啟動，解除 routing-enforcer 對 SubAgent 的阻擋"
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/subagent-lifecycle.js\" stop",
+            "timeout": 3
+          }
+        ],
+        "description": "註銷 SubAgent 結束，恢復 routing-enforcer 阻擋"
+      }
+    ],
     "PreCompact": [
       {
         "matcher": "*",

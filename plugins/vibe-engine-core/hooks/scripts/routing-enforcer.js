@@ -98,6 +98,33 @@ function checkClassificationFallback() {
 }
 
 /**
+ * 檢查是否有活躍的 SubAgent（SubagentStart 生命週期信號）
+ * 如果有 SubAgent 正在執行，放行 Write/Edit/Bash
+ *
+ * 解決死結：PreToolUse hookInput 無法區分 Main/SubAgent
+ * 透過 SubagentStart hook 寫入 active-subagent.json 作為信號
+ * @returns {object|null} { agentId, type, startedAt } or null
+ */
+const SUBAGENT_TTL = 10 * 60 * 1000;
+
+function checkActiveSubagent() {
+  const paths = getVibeEnginePaths();
+  const filePath = path.join(paths.root, 'active-subagent.json');
+  const data = safeReadJSON(filePath, null);
+
+  if (!data || !data.agents) return null;
+
+  const now = Date.now();
+  for (const [id, info] of Object.entries(data.agents)) {
+    if (now - info.startedAt <= SUBAGENT_TTL) {
+      return { agentId: id, type: info.type, startedAt: info.startedAt };
+    }
+  }
+
+  return null;
+}
+
+/**
  * 檢查是否有活躍的路由計劃需要委派
  * @param {string} projectRoot
  * @returns {object|null} { shouldDelegate, delegateTo, planId, taskDescription }
@@ -163,6 +190,16 @@ function evaluateRouting(hookInput) {
     return {
       decision: 'allow',
       reason: `Auto-fix mode active (iteration ${autoFixBypass.iteration})`
+    };
+  }
+
+  // ★ SubAgent 生命週期 bypass — SubAgent 在執行中 → 放行
+  // 解決死結：PreToolUse 無法區分 Main/SubAgent，透過 active-subagent.json 信號判斷
+  const activeSubagent = checkActiveSubagent();
+  if (activeSubagent) {
+    return {
+      decision: 'allow',
+      reason: `SubAgent active: ${activeSubagent.type} (routing enforcement bypassed)`
     };
   }
 
@@ -408,7 +445,9 @@ module.exports = {
   ALLOWED_TOOLS,
   EXECUTION_TOOLS,
   CLASSIFICATION_TTL,
+  SUBAGENT_TTL,
   checkAutoFixMode,
+  checkActiveSubagent,
   checkClassificationFallback,
   checkRoutingState,
   evaluateRouting,

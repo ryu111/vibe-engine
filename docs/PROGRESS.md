@@ -47,6 +47,21 @@
   - Auto-Fix 狀態持久化至 `.vibe-engine/auto-fix-state.json`
 - **驗證**: E2E 測試場景 G（9 個測試全通過）
 
+### ✅ 缺口 4：routing-enforcer 死結 → 已解決！
+```
+之前：routing-enforcer 阻擋所有 Write/Edit/Bash → 包括 SubAgent 也被擋 → 死結
+現在：SubagentStart hook 寫信號 → routing-enforcer 偵測 SubAgent → 放行
+```
+- **根因**: PreToolUse hookInput 無法區分 Main Agent vs SubAgent（沒有 agent_id/parent_tool_use_id 欄位）
+- **實作內容**:
+  - `subagent-lifecycle.js` — SubagentStart/SubagentStop 生命週期追蹤，寫入 `active-subagent.json`
+  - `routing-enforcer.js` — 新增 `checkActiveSubagent()` bypass（在 auto-fix 之後、EnterPlanMode 之前）
+  - `hooks.json` — 新增 SubagentStart + SubagentStop 事件配置
+  - `agent-router.js` — 透明性 checkpoint 展示規則（MUST display before dispatch）
+  - `routing-progress-tracker.js` — tool_name case-insensitive 修復
+- **安全模型**: SubAgent bypass 位於 EnterPlanMode deny 之前，task-tool-validator 確保 agent type 正確
+- **驗證**: 待 E2E 測試
+
 ### ✅ 缺口 3：Instinct Learning 沒有運作 → 已解決！
 ```
 之前：observation-collector.js 收集觀察，但沒有後續
@@ -116,6 +131,7 @@
 | | task-decomposition-engine.js | ✅ | ✅ | ✅ | ✅ **計分制模式 + 複合需求整合 + 路徑消除** |
 | | agent-router.js | ✅ | ✅ | ✅ | ✅ **強制指令 + 中文疑問模式** |
 | | routing-completion-validator.js | ✅ | ✅ | ✅ | ✅ 閉環驗證 + 重試機制 |
+| | subagent-lifecycle.js | ✅ | ✅ | ✅ | ✅ SubAgent 生命週期信號 + routing bypass |
 | | routing-state-manager.js | ✅ | ✅ | ✅ | ✅ 狀態追蹤 + 摘要 |
 | | completion-check.js | ✅ | ✅ | ✅ | ✅ **重寫：任務狀態聚合器** |
 | | verification-engine.js | ✅ | ✅ | ✅ | ✅ 上下文感知 + Auto-Fix |

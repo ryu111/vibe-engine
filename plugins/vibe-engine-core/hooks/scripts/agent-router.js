@@ -434,6 +434,29 @@ function generateRoutingDirective(plan, planId, originalRequest) {
     ''
   ];
 
+  // === 透明性展示規則 ===
+  const totalTasks = plan.phases.reduce((s, p) => s + p.tasks.length, 0);
+  lines.push('### 透明性展示（MUST 在 dispatch 前向用戶展示）');
+  lines.push('');
+  lines.push('在 dispatch 任何 agent 之前，**必須**先向用戶展示路由計劃摘要：');
+  lines.push('```');
+  lines.push('[CHECKPOINT] Task Decomposition');
+  lines.push('├─ 原始請求：[用你自己的話簡述用戶的需求]');
+  lines.push(`├─ 策略：${plan.strategy}`);
+  lines.push(`├─ 子任務數量：${totalTasks}`);
+  lines.push(`├─ 執行階段：${plan.phases.length} phases`);
+  lines.push('├─ 計劃：');
+  for (const ph of plan.phases) {
+    for (const t of ph.tasks) {
+      lines.push(`│   Phase ${ph.phase} │ ${t.agent.padEnd(10)} │ ${t.description.slice(0, 30)} │ ${t.model}`);
+    }
+  }
+  lines.push('└─ 開始執行 Phase 1');
+  lines.push('```');
+  lines.push('');
+  lines.push('展示後**立即開始執行**，不需等待用戶確認。');
+  lines.push('');
+
   // 每個 Phase 的任務
   for (const phase of plan.phases) {
     lines.push(`### Phase ${phase.phase} ${phase.parallel ? '(並行執行)' : '(序列執行)'}`);
