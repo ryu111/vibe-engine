@@ -23,6 +23,7 @@
  * R. 完整生命週期模擬（UserPromptSubmit → PostToolUse → Stop → memory-consolidation）
  * S. 管道契約測試（stdin/stdout 欄位名契約、hookSpecificOutput 雙通道、Stop 阻擋）
  * T. 真實語料分類測試（34 條中文口語化 prompt 準確率 + 邊界案例 + 進程管道驗證）
+ * U. 混合分類器測試（三層架構、LLM mock、fallback、快取、config 控制、向後相容）
  */
 
 const path = require('path');
@@ -49,8 +50,15 @@ const { parseSimpleYaml, jsonToYaml } =
   require(path.join(SCRIPTS_DIR, 'lib/yaml-parser'));
 const {
   classifyRequest, classifyComplexity, analyzePromptMetrics,
-  sanitizePrompt, countWords, detectCompoundRequirements
+  sanitizePrompt, countWords, detectCompoundRequirements,
+  tryFastPath, analyzeStructural, buildClassificationResult,
+  STRUCTURAL_FEATURES, INDICATORS
 } = require(path.join(SCRIPTS_DIR, 'prompt-classifier'));
+const {
+  classifyWithLLM, validateLLMResult, getApiKey,
+  lookupCache, writeCache, loadCache, hashPrompt,
+  setHttpRequestFn
+} = require(path.join(SCRIPTS_DIR, 'lib/llm-classifier'));
 const {
   aggregateTaskState, shouldDefer, generateCompletionSummary
 } = require(path.join(SCRIPTS_DIR, 'completion-check'));
@@ -962,7 +970,7 @@ async function testHookChainPipeline() {
     );
 
     // 直接測試分類邏輯
-    const classification = classifyRequest(triggerPrompt);
+    const classification = await classifyRequest(triggerPrompt);
     assert(
       classification.complexity === 'moderate',
       'H1.2 觸發詞分類為 moderate',
@@ -1081,7 +1089,7 @@ async function testHookChainPipeline() {
       user_prompt: '什麼是 REST API？'
     }, hookEnv);
 
-    const simpleClassification = classifyRequest('什麼是 REST API？');
+    const simpleClassification = await classifyRequest('什麼是 REST API？');
     assert(
       simpleClassification.complexity === 'simple',
       'H6.1 簡單查詢分類為 simple',
@@ -1178,21 +1186,21 @@ async function testClassifierAccuracy() {
     // ── I4: 分類結果回歸 ──
     console.log('\n📋 Step 4: 分類結果回歸');
 
-    const case1 = classifyRequest('什麼是 REST API？');
+    const case1 = await classifyRequest('什麼是 REST API？');
     assert(
       case1.complexity === 'simple' && case1.requestType === 'query',
       'I4.1 純查詢 → simple/query',
       `${case1.complexity}/${case1.requestType}`
     );
 
-    const case2 = classifyRequest('修復 auth.js 中的登入驗證 bug');
+    const case2 = await classifyRequest('修復 auth.js 中的登入驗證 bug');
     assert(
       case2.complexity === 'moderate',
       'I4.2 單一修復 → moderate',
       `complexity: ${case2.complexity}`
     );
 
-    const case3 = classifyRequest(
+    const case3 = await classifyRequest(
       '幫我在 test-projects/phone-login 專案中加入忘記密碼功能，要有 UI 和驗證邏輯'
     );
     assert(
@@ -1206,7 +1214,7 @@ async function testClassifierAccuracy() {
       `needsDecomposition: ${case3.needsDecomposition}`
     );
 
-    const case4 = classifyRequest('重構整個專案的認證模組，需要修改多個檔案');
+    const case4 = await classifyRequest('重構整個專案的認證模組，需要修改多個檔案');
     assert(
       case4.complexity === 'complex',
       'I4.5 整個+重構+多個 → complex',
@@ -1215,7 +1223,7 @@ async function testClassifierAccuracy() {
 
     // ── I5: 路徑誤判防護 ──
     console.log('\n📋 Step 5: 路徑誤判防護');
-    const case5 = classifyRequest('查看 test-results/output.json 的內容');
+    const case5 = await classifyRequest('查看 test-results/output.json 的內容');
     assert(
       case5.complexity === 'simple',
       'I5.1 含 test 路徑的查詢不誤判為 moderate',
@@ -1228,7 +1236,7 @@ async function testClassifierAccuracy() {
       user_prompt: '幫我在 test-projects/phone-login 專案中加入忘記密碼功能，要有 UI 和驗證邏輯'
     }, hookEnv);
 
-    const step6Classification = classifyRequest('幫我在 test-projects/phone-login 專案中加入忘記密碼功能，要有 UI 和驗證邏輯');
+    const step6Classification = await classifyRequest('幫我在 test-projects/phone-login 專案中加入忘記密碼功能，要有 UI 和驗證邏輯');
     assert(
       step6Classification.complexity === 'moderate',
       'I6.1 觸發詞進程執行結果為 moderate',
@@ -2317,7 +2325,7 @@ async function testFullLifecycle() {
     console.log('📋 R1-R3: UserPromptSubmit 管道');
     const prompt = '幫我建立用戶認證 API，要有登入、註冊和測試';
     const s1 = runHookScript('prompt-classifier.js', { user_prompt: prompt }, hookEnv);
-    const r1Classification = classifyRequest(prompt);
+    const r1Classification = await classifyRequest(prompt);
     assert(
       r1Classification.needsDecomposition === true,
       'R1 prompt-classifier → needsDecomposition',
@@ -2746,7 +2754,7 @@ async function testRealWorldClassification() {
   const failures = [];
 
   for (const testCase of testCorpus) {
-    const result = classifyRequest(testCase.prompt);
+    const result = await classifyRequest(testCase.prompt);
     if (result.complexity === testCase.expected) {
       correct++;
     } else {
@@ -2777,7 +2785,7 @@ async function testRealWorldClassification() {
   console.log('\n📋 T2: 邊界案例測試');
 
   // "做什麼" 是查詢，不是 complex
-  const edge1 = classifyRequest('這個函數做什麼');
+  const edge1 = await classifyRequest('這個函數做什麼');
   assert(
     edge1.complexity !== 'complex',
     'T2.1 "做什麼" 不應分類為 complex',
@@ -2785,7 +2793,7 @@ async function testRealWorldClassification() {
   );
 
   // 路徑中的關鍵字不應影響分類
-  const edge2 = classifyRequest('查看 game-server/build/output.log 的內容');
+  const edge2 = await classifyRequest('查看 game-server/build/output.log 的內容');
   assert(
     edge2.complexity === 'simple',
     'T2.2 路徑含 game/build 的查詢仍為 simple',
@@ -2793,7 +2801,7 @@ async function testRealWorldClassification() {
   );
 
   // 短 prompt 不應預設 complex
-  const edge3 = classifyRequest('Hi');
+  const edge3 = await classifyRequest('Hi');
   assert(
     edge3.complexity !== 'complex',
     'T2.3 極短 prompt 不應為 complex',
@@ -2806,7 +2814,7 @@ async function testRealWorldClassification() {
   const complexCases = testCorpus.filter(t => t.expected === 'complex');
   let decompCount = 0;
   for (const tc of complexCases) {
-    const r = classifyRequest(tc.prompt);
+    const r = await classifyRequest(tc.prompt);
     if (r.needsDecomposition) decompCount++;
   }
 
@@ -2854,6 +2862,336 @@ async function testRealWorldClassification() {
 }
 
 // ============================================================
+// 場景 U: 混合分類器測試
+// ============================================================
+
+async function testHybridClassifier() {
+  console.log('\n\n📦 場景 U: 混合分類器測試（三層架構 + LLM mock + fallback + 快取）');
+  console.log('─'.repeat(60));
+
+  // ── U1: 結構分析路徑 — 高信度案例不觸發 LLM ──
+  console.log('\n📋 U1: 結構分析路徑');
+
+  // simple: 疑問句
+  const u1a = await classifyRequest('什麼是 TypeScript？');
+  assert(
+    u1a.complexity === 'simple',
+    'U1.1 疑問句分類為 simple',
+    `complexity: ${u1a.complexity}`
+  );
+  assert(
+    u1a.classificationMethod === 'structural' || u1a.classificationMethod === 'fast_path',
+    'U1.2 高信度案例不觸發 LLM',
+    `method: ${u1a.classificationMethod}`
+  );
+
+  // complex: 做一個+產品名詞
+  const u1b = await classifyRequest('做一個單機版的植物大戰殭屍小遊戲');
+  assert(
+    u1b.complexity === 'complex',
+    'U1.3 「做一個+遊戲」分類為 complex',
+    `complexity: ${u1b.complexity}`
+  );
+  assert(
+    u1b.classificationMethod === 'structural',
+    'U1.4 create_product_pattern 高信度',
+    `method: ${u1b.classificationMethod}`
+  );
+  assert(
+    u1b.needsDecomposition === true,
+    'U1.5 complex 需要分解',
+    `needsDecomposition: ${u1b.needsDecomposition}`
+  );
+
+  // simple: 極短無動作
+  const u1c = await classifyRequest('Hi');
+  assert(
+    u1c.complexity === 'simple',
+    'U1.6 極短 prompt 為 simple',
+    `complexity: ${u1c.complexity}`
+  );
+
+  // fast_path: 指令
+  const u1d = await classifyRequest('/status');
+  assert(
+    u1d.classificationMethod === 'fast_path',
+    'U1.7 指令走 fast_path',
+    `method: ${u1d.classificationMethod}`
+  );
+  assert(
+    u1d.classificationConfidence === 1.0,
+    'U1.8 fast_path 信度 = 1.0',
+    `confidence: ${u1d.classificationConfidence}`
+  );
+
+  // ── U2: LLM mock 測試 ──
+  console.log('\n📋 U2: LLM mock 測試');
+
+  // 建立 mock 的 PassThrough stream
+  const { PassThrough } = require('stream');
+
+  // 先保存原始環境變數
+  const origApiKey = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'test-key-for-mock';
+
+  // Mock 成功回應
+  setHttpRequestFn((options, callback) => {
+    const mockRes = new PassThrough();
+    mockRes.statusCode = 200;
+    // 延遲回應模擬網路延遲
+    setTimeout(() => {
+      callback(mockRes);
+      mockRes.emit('data', JSON.stringify({
+        content: [{ text: '{"complexity":"complex","requestType":"action","suggestedAgent":"architect","needsDecomposition":true}' }]
+      }));
+      mockRes.emit('end');
+    }, 10);
+    return {
+      write() {},
+      end() {},
+      on() {},
+      destroy() {}
+    };
+  });
+
+  // 用一個低信度的 prompt 觸發 LLM（結構分析無法確定）
+  const u2a = await classifyWithLLM('來個聊天室吧', 'test-key');
+  assert(
+    u2a.complexity === 'complex',
+    'U2.1 LLM mock 回傳 complex',
+    `complexity: ${u2a.complexity}`
+  );
+  assert(
+    u2a.suggestedAgent === 'architect',
+    'U2.2 LLM 回傳 suggestedAgent',
+    `agent: ${u2a.suggestedAgent}`
+  );
+
+  // ── U3: LLM 失敗 fallback ──
+  console.log('\n📋 U3: LLM 失敗 fallback');
+
+  // Mock timeout 錯誤
+  setHttpRequestFn((options, callback) => {
+    const req = {
+      write() {},
+      end() {},
+      on(event, handler) {
+        if (event === 'timeout') {
+          setTimeout(() => handler(), 10);
+        }
+      },
+      destroy() {}
+    };
+    return req;
+  });
+
+  try {
+    await classifyWithLLM('測試 timeout', 'test-key');
+    assert(false, 'U3.1 LLM timeout 應該拋出錯誤', 'did not throw');
+  } catch (err) {
+    assert(
+      err.message === 'LLM timeout',
+      'U3.1 LLM timeout 錯誤訊息正確',
+      `error: ${err.message}`
+    );
+  }
+
+  // Mock HTTP 錯誤
+  setHttpRequestFn((options, callback) => {
+    const mockRes = new PassThrough();
+    mockRes.statusCode = 429;
+    setTimeout(() => {
+      callback(mockRes);
+      mockRes.emit('data', '{"error":"rate_limited"}');
+      mockRes.emit('end');
+    }, 10);
+    return {
+      write() {},
+      end() {},
+      on() {},
+      destroy() {}
+    };
+  });
+
+  try {
+    await classifyWithLLM('測試 429', 'test-key');
+    assert(false, 'U3.2 HTTP 429 應該拋出錯誤', 'did not throw');
+  } catch (err) {
+    assert(
+      err.message.includes('429'),
+      'U3.2 HTTP 429 錯誤訊息包含狀態碼',
+      `error: ${err.message}`
+    );
+  }
+
+  // 恢復
+  setHttpRequestFn(null);
+  if (origApiKey) {
+    process.env.ANTHROPIC_API_KEY = origApiKey;
+  } else {
+    delete process.env.ANTHROPIC_API_KEY;
+  }
+
+  // ── U4: validateLLMResult — schema 驗證 ──
+  console.log('\n📋 U4: LLM 結果驗證');
+
+  // 正常結果
+  const u4a = validateLLMResult({
+    complexity: 'complex',
+    requestType: 'action',
+    suggestedAgent: 'architect',
+    needsDecomposition: true
+  });
+  assert(u4a.complexity === 'complex', 'U4.1 正常 complexity', `got: ${u4a.complexity}`);
+  assert(u4a.suggestedAgent === 'architect', 'U4.2 正常 agent', `got: ${u4a.suggestedAgent}`);
+
+  // 非法值 → fallback
+  const u4b = validateLLMResult({
+    complexity: 'very_hard',
+    requestType: 'unknown',
+    suggestedAgent: 'wizard',
+    needsDecomposition: 'yes'
+  });
+  assert(u4b.complexity === 'moderate', 'U4.3 非法 complexity → moderate', `got: ${u4b.complexity}`);
+  assert(u4b.requestType === 'action', 'U4.4 非法 requestType → action', `got: ${u4b.requestType}`);
+  assert(u4b.suggestedAgent === null, 'U4.5 非法 agent → null', `got: ${u4b.suggestedAgent}`);
+  assert(u4b.needsDecomposition === false, 'U4.6 非法 boolean → false', `got: ${u4b.needsDecomposition}`);
+
+  // null agent（字串 "null"）
+  const u4c = validateLLMResult({
+    complexity: 'simple',
+    requestType: 'query',
+    suggestedAgent: 'null',
+    needsDecomposition: false
+  });
+  assert(u4c.suggestedAgent === null, 'U4.7 "null" 字串 → null', `got: ${u4c.suggestedAgent}`);
+
+  // ── U5: 快取機制 ──
+  console.log('\n📋 U5: 快取機制');
+
+  const tempDir = path.join(__dirname, '.test-temp-u-' + Date.now());
+  fs.mkdirSync(tempDir, { recursive: true });
+  const cachePath = path.join(tempDir, 'classifier-cache.json');
+
+  // 寫入快取
+  writeCache('做一個遊戲', { complexity: 'complex', requestType: 'action', suggestedAgent: 'architect', needsDecomposition: true }, cachePath);
+
+  // 讀取快取
+  const cached = lookupCache('做一個遊戲', cachePath);
+  assert(cached !== null, 'U5.1 快取命中', `cached: ${JSON.stringify(cached)}`);
+  assert(cached.complexity === 'complex', 'U5.2 快取內容正確', `got: ${cached.complexity}`);
+
+  // 正規化：空格差異仍命中
+  const cached2 = lookupCache('做一個遊戲', cachePath);
+  assert(cached2 !== null, 'U5.3 正規化後仍命中', `cached: ${cached2 !== null}`);
+
+  // 不同 prompt 不命中
+  const cached3 = lookupCache('做一個完全不同的東西', cachePath);
+  assert(cached3 === null, 'U5.4 不同 prompt 不命中', `cached: ${cached3}`);
+
+  // TTL 過期：用 0ms TTL
+  const cachedExpired = lookupCache('做一個遊戲', cachePath, 0);
+  assert(cachedExpired === null, 'U5.5 TTL 過期不命中', `cached: ${cachedExpired}`);
+
+  // 快取統計
+  const cache = loadCache(cachePath);
+  assert(cache.version === 1, 'U5.6 快取版本號', `version: ${cache.version}`);
+  assert(cache.stats.llmCalls >= 1, 'U5.7 快取 LLM 呼叫統計', `calls: ${cache.stats.llmCalls}`);
+
+  // hashPrompt 一致性
+  const h1 = hashPrompt('做一個遊戲');
+  const h2 = hashPrompt('做一個遊戲');
+  const h3 = hashPrompt('做一個不同的東西');
+  assert(h1 === h2, 'U5.8 相同 prompt hash 一致', `h1=${h1}, h2=${h2}`);
+  assert(h1 !== h3, 'U5.9 不同 prompt hash 不同', `h1=${h1}, h3=${h3}`);
+
+  fs.rmSync(tempDir, { recursive: true, force: true });
+
+  // ── U6: API key 缺失時不呼叫 LLM ──
+  console.log('\n📋 U6: API key 缺失 fallback');
+
+  const origKey2 = process.env.ANTHROPIC_API_KEY;
+  const origVibeKey = process.env.VIBE_ENGINE_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.VIBE_ENGINE_API_KEY;
+
+  assert(getApiKey() === null, 'U6.1 無 API key 時回傳 null', `key: ${getApiKey()}`);
+
+  // 用低信度 prompt（結構分析 < 0.8）— 應走 structural_fallback
+  // "弄一下那個東西" — 動作動詞「弄」但無產品名詞，結構分析信度 < 0.8
+  const u6a = await classifyRequest('弄一下那個東西');
+  assert(
+    u6a.classificationMethod === 'structural_fallback' || u6a.classificationMethod === 'structural',
+    'U6.2 無 API key 走 structural 或 structural_fallback',
+    `method: ${u6a.classificationMethod}`
+  );
+
+  // 恢復
+  if (origKey2) process.env.ANTHROPIC_API_KEY = origKey2;
+  if (origVibeKey) process.env.VIBE_ENGINE_API_KEY = origVibeKey;
+
+  // ── U7: 結構特徵覆蓋驗證 ──
+  console.log('\n📋 U7: 結構特徵覆蓋驗證');
+
+  // analyzeStructural 回傳結構
+  const s1 = analyzeStructural('什麼是 Promise？');
+  assert(s1.level === 'simple', 'U7.1 疑問句 → simple', `level: ${s1.level}`);
+  assert(s1.confidence >= 0.9, 'U7.2 疑問句信度 >= 0.9', `conf: ${s1.confidence}`);
+  assert(!s1.needsLLM, 'U7.3 高信度不需 LLM', `needsLLM: ${s1.needsLLM}`);
+  assert(s1.matchedFeatures.length > 0, 'U7.4 有匹配特徵', `features: ${s1.matchedFeatures}`);
+
+  const s2 = analyzeStructural('寫一個 Todo App');
+  assert(s2.level === 'complex', 'U7.5 寫一個 App → complex', `level: ${s2.level}`);
+  assert(s2.confidence >= 0.8, 'U7.6 create_product 高信度', `conf: ${s2.confidence}`);
+
+  // 多步驟
+  const s3 = analyzeStructural('首先設計 API，然後實作前端');
+  assert(s3.level === 'complex', 'U7.7 多步驟 → complex', `level: ${s3.level}`);
+
+  // tryFastPath
+  assert(tryFastPath('/status') !== null, 'U7.8 /status 走 fast_path', '');
+  assert(tryFastPath('/help') !== null, 'U7.9 /help 走 fast_path', '');
+  assert(tryFastPath('做一個遊戲') === null, 'U7.10 非指令不走 fast_path', '');
+
+  // ── U8: 向後相容性 ──
+  console.log('\n📋 U8: 向後相容性');
+
+  // classifyRequest 輸出應包含所有既有欄位
+  const u8a = await classifyRequest('implement a REST API with authentication');
+  assert('complexity' in u8a, 'U8.1 有 complexity 欄位', '');
+  assert('requestType' in u8a, 'U8.2 有 requestType 欄位', '');
+  assert('needsDecomposition' in u8a, 'U8.3 有 needsDecomposition 欄位', '');
+  assert('suggestedAgent' in u8a, 'U8.4 有 suggestedAgent 欄位', '');
+  assert('metrics' in u8a, 'U8.5 有 metrics 欄位', '');
+  // 新增欄位
+  assert('classificationMethod' in u8a, 'U8.6 有 classificationMethod 欄位', '');
+  assert('classificationConfidence' in u8a, 'U8.7 有 classificationConfidence 欄位', '');
+
+  // metrics 結構不變
+  assert('wordCount' in u8a.metrics, 'U8.8 metrics.wordCount 存在', '');
+  assert('charCount' in u8a.metrics, 'U8.9 metrics.charCount 存在', '');
+  assert('compoundRequirements' in u8a.metrics, 'U8.10 metrics.compoundRequirements 存在', '');
+
+  // 同步 classifyComplexity 仍可用
+  const u8b = classifyComplexity('什麼是 REST API？');
+  assert(u8b === 'simple', 'U8.11 同步 classifyComplexity 仍可用', `got: ${u8b}`);
+
+  // INDICATORS 常量仍可存取
+  assert(INDICATORS.simple.en.length > 0, 'U8.12 INDICATORS 常量仍可存取', '');
+  assert(STRUCTURAL_FEATURES.definitelySimple.length > 0, 'U8.13 STRUCTURAL_FEATURES 可存取', '');
+
+  // 傳給 decomposeTask 不會報錯
+  try {
+    const decomp = decomposeTask('build a chat application', u8a);
+    assert(decomp !== null && decomp !== undefined, 'U8.14 decomposeTask 可接受新格式', '');
+  } catch (e) {
+    assert(false, 'U8.14 decomposeTask 不應因新格式報錯', `error: ${e.message}`);
+  }
+
+  console.log('\n✅ 場景 U 完成');
+}
+
+// ============================================================
 // 主測試執行
 // ============================================================
 async function runAllTests() {
@@ -2883,6 +3221,7 @@ async function runAllTests() {
     await testFullLifecycle();             // 場景 R
     await testPipelineContract();          // 場景 S
     await testRealWorldClassification();   // 場景 T
+    await testHybridClassifier();          // 場景 U
   } catch (error) {
     console.error('\n❌ 測試執行錯誤:', error.message);
     console.error(error.stack);

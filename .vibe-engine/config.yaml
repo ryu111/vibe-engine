@@ -6,3 +6,12 @@ budget:
     warning: 0.70
     urgent: 0.90
     exceeded: 1.00
+
+classifier:
+  llm_enabled: true
+  llm_model: "claude-haiku-4-5-20251001"
+  llm_timeout_ms: 3000
+  confidence_threshold: 0.8
+  cache_enabled: true
+  cache_ttl_ms: 86400000
+  cache_max_entries: 500
