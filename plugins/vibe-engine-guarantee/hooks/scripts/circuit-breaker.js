@@ -259,8 +259,15 @@ function main() {
 
   if (result.decision === 'BLOCK') {
     console.log(JSON.stringify({
-      decision: 'block',
-      reason: result.message
+      continue: false,
+      suppressOutput: false,
+      systemMessage: `⛔ Circuit Breaker OPEN: ${result.message}`,
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: result.message,
+        additionalContext: 'Circuit breaker is OPEN due to repeated failures. Wait for the cooldown period to expire, then retry. Do NOT force-retry the same failing operation.'
+      }
     }));
   } else {
     console.log(JSON.stringify({

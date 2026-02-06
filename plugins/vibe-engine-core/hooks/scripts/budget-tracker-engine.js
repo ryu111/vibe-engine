@@ -447,38 +447,60 @@ function preToolUseCheck(toolName, sessionId, budget, usage) {
   const budgetUsage = getBudgetUsage(usage, budget);
   const alert = getAlertLevel(budgetUsage);
 
-  // 如果預算已用盡，阻止操作
+  // 如果預算已用盡，阻止操作 — 雙效：deny + additionalContext
   if (alert.level === 'exceeded') {
+    const usagePercent = Math.round(budgetUsage.overall * 100);
+    const reason = `預算已用盡 (${usagePercent}%)。請增加預算或結束任務。`;
     return {
       continue: false,
-      decision: 'block',
-      reason: `預算已用盡 (${Math.round(budgetUsage.overall * 100)}%)。請增加預算或結束任務。`
+      suppressOutput: false,
+      systemMessage: `⛔ Budget Exceeded: ${reason}`,
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: reason,
+        additionalContext: 'MANDATORY: Budget is exceeded. You MUST stop all operations and inform the user. Use /budget command to check details or ask user to increase budget limits.'
+      }
     };
   }
 
-  // 預算緊急（>= 90%）：強制阻擋高成本操作
+  // 預算緊急（>= 90%）：強制阻擋高成本操作 — 雙效：deny + additionalContext
   if (alert.level === 'critical' && ['Edit', 'Write', 'Bash'].includes(toolName)) {
     const usagePercent = Math.round(budgetUsage.overall * 100);
     if (usagePercent >= 90) {
+      const reason = `預算臨界 (${usagePercent}%)。必須切換至 Haiku 模型或結束任務。`;
       return {
         continue: false,
-        decision: 'block',
-        reason: `預算臨界 (${usagePercent}%)。必須切換至 Haiku 模型或結束任務。`,
-        suggested_model: 'haiku'
+        suppressOutput: false,
+        systemMessage: `⚠️ Budget Critical: ${reason}`,
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: reason,
+          additionalContext: `MANDATORY: Budget at ${usagePercent}%. Switch to haiku model for remaining work, or complete current task and stop. Use model: "haiku" in Task tool calls.`
+        }
       };
     }
     return {
       continue: true,
-      decision: 'warn',
-      reason: `預算緊急 (${usagePercent}%)。建議完成當前步驟後暫停。`,
-      suggested_model: 'haiku'
+      suppressOutput: false,
+      systemMessage: `⚠️ Budget Warning (${usagePercent}%)。建議完成當前步驟後暫停。`,
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+        permissionDecisionReason: `Budget warning: ${usagePercent}%`,
+        additionalContext: `Budget at ${usagePercent}%. Consider switching to haiku model and wrapping up current task.`
+      }
     };
   }
 
   return {
     continue: true,
-    decision: 'approve',
-    budget_status: `${Math.round(budgetUsage.overall * 100)}%`
+    suppressOutput: true,
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'allow'
+    }
   };
 }
 

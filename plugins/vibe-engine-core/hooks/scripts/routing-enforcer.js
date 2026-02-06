@@ -64,6 +64,40 @@ function checkAutoFixMode() {
 }
 
 /**
+ * Fallback: 當 routing-state 不存在時，檢查 last-classification.json
+ * 如果最近（30 秒內）有 complex 分類，仍應阻擋 Main Agent 直接執行
+ *
+ * 防禦縱深：即使 agent-router 失敗，仍能攔截複雜任務
+ * @returns {object|null} { suggestedAgent, complexity }
+ */
+const CLASSIFICATION_TTL = 30000; // 30 秒
+function checkClassificationFallback() {
+  const paths = getVibeEnginePaths();
+  const classification = safeReadJSON(path.join(paths.root, 'last-classification.json'), null);
+
+  if (!classification) return null;
+
+  // 時效檢查：只信任 CLASSIFICATION_TTL 內的分類結果
+  if (classification.timestamp) {
+    const age = Date.now() - classification.timestamp;
+    if (age > CLASSIFICATION_TTL) return null;
+  } else {
+    // 沒有 timestamp 的分類不可信
+    return null;
+  }
+
+  // 只有 complex 才觸發 fallback deny（moderate 允許 Main Agent 直接處理）
+  if (classification.complexity === 'complex') {
+    return {
+      suggestedAgent: classification.suggestedAgent || 'architect',
+      complexity: classification.complexity
+    };
+  }
+
+  return null;
+}
+
+/**
  * 檢查是否有活躍的路由計劃需要委派
  * @param {string} projectRoot
  * @returns {object|null} { shouldDelegate, delegateTo, planId, taskDescription }
@@ -144,22 +178,35 @@ function evaluateRouting(hookInput) {
   // 檢查路由狀態
   const routingInfo = checkRoutingState();
 
-  if (!routingInfo || !routingInfo.shouldDelegate) {
-    // 沒有活躍路由計劃：允許
+  if (routingInfo && routingInfo.shouldDelegate) {
+    // 有活躍路由計劃且指定了委派 agent：阻止
     return {
-      decision: 'allow',
-      reason: 'No active routing plan'
+      decision: 'deny',
+      reason: `Task is assigned to ${routingInfo.delegateTo} agent`,
+      delegateTo: routingInfo.delegateTo,
+      planId: routingInfo.planId,
+      taskId: routingInfo.taskId,
+      taskDescription: routingInfo.taskDescription
     };
   }
 
-  // 有活躍路由計劃且指定了委派 agent：阻止
+  // ★ 防禦縱深：沒有 routing-state 但有 complex 分類 → 仍阻擋
+  // 場景：agent-router 失敗/超時 → routing-state.json 未建立
+  //        但 prompt-classifier 已正確分類為 complex
+  const classificationFallback = checkClassificationFallback();
+  if (classificationFallback) {
+    return {
+      decision: 'deny',
+      reason: 'Complex task detected but routing plan missing — must delegate',
+      classificationFallback: true,
+      suggestedAgent: classificationFallback.suggestedAgent
+    };
+  }
+
+  // 沒有活躍路由計劃也沒有 complex 分類：允許
   return {
-    decision: 'deny',
-    reason: `Task is assigned to ${routingInfo.delegateTo} agent`,
-    delegateTo: routingInfo.delegateTo,
-    planId: routingInfo.planId,
-    taskId: routingInfo.taskId,
-    taskDescription: routingInfo.taskDescription
+    decision: 'allow',
+    reason: 'No active routing plan'
   };
 }
 
@@ -195,6 +242,38 @@ function buildDenyMessage(info) {
       '```',
       '',
       '⛔ **EnterPlanMode 違反 Router, Not Executor 原則 — 規劃工作必須委派給 architect**',
+      ''
+    ];
+    return lines.join('\n');
+  }
+
+  // 防禦縱深：classification fallback 阻擋
+  if (info.classificationFallback) {
+    const agent = info.suggestedAgent || 'architect';
+    const lines = [
+      '',
+      '╔══════════════════════════════════════════════════════════════════╗',
+      '║  ⛔ 複雜任務攔截 - Classification Fallback                        ║',
+      '╠══════════════════════════════════════════════════════════════════╣',
+      '║  此任務被分類為 complex，Main Agent 不可直接執行                  ║',
+      '║  路由計劃未建立（可能 agent-router 超時），但防禦縱深仍攔截       ║',
+      '╠══════════════════════════════════════════════════════════════════╣',
+      `║  MUST: 使用 Task tool 委派給 ${agent} agent                       ║`,
+      '╚══════════════════════════════════════════════════════════════════╝',
+      '',
+      '### 正確做法',
+      '',
+      `先委派 architect 設計架構，再委派 developer 實作：`,
+      '```',
+      'Task({',
+      `  subagent_type: "vibe-engine-core:${agent}",`,
+      '  description: "設計架構方案",',
+      '  prompt: "分析需求並設計架構...",',
+      '  model: "sonnet"',
+      '})',
+      '```',
+      '',
+      '⛔ **複雜任務必須先經過 architect 規劃，再由 developer 實作 — Router, Not Executor**',
       ''
     ];
     return lines.join('\n');
@@ -236,6 +315,29 @@ function buildDenyMessage(info) {
   return lines.join('\n');
 }
 
+/**
+ * 生成引導上下文（additionalContext）
+ * deny 時提供正向指引：告訴 Claude 該怎麼做而不只是禁止
+ * @param {object} result - evaluateRouting 的結果
+ * @returns {string}
+ */
+function buildGuidanceContext(result) {
+  if (result.unconditionalBlock) {
+    return 'MANDATORY: Do NOT use EnterPlanMode. Instead, use Task tool to delegate to vibe-engine-core:architect agent for architecture planning.';
+  }
+
+  if (result.classificationFallback) {
+    const agent = result.suggestedAgent || 'architect';
+    return `MANDATORY: This is a complex task. You are a Router, NOT an Executor. Use Task tool to delegate to vibe-engine-core:${agent} agent. Start with architect for planning, then developer for implementation.`;
+  }
+
+  if (result.delegateTo) {
+    return `MANDATORY: This task is assigned to ${result.delegateTo} agent. Use Task tool with subagent_type: "vibe-engine-core:${result.delegateTo}" to delegate. Do NOT execute directly.`;
+  }
+
+  return 'MANDATORY: Use Task tool to delegate to the appropriate agent. Main Agent must only route, not execute.';
+}
+
 // ============================================================
 // 主流程
 // ============================================================
@@ -271,14 +373,19 @@ async function main() {
     return;
   }
 
-  // 阻止執行
+  // 阻止執行 — 雙效：deny（強制）+ additionalContext（引導）
   const denyMessage = buildDenyMessage({
     delegateTo: result.delegateTo,
     planId: result.planId,
     taskId: result.taskId,
     taskDescription: result.taskDescription,
-    unconditionalBlock: result.unconditionalBlock || false
+    unconditionalBlock: result.unconditionalBlock || false,
+    classificationFallback: result.classificationFallback || false,
+    suggestedAgent: result.suggestedAgent
   });
+
+  // 生成引導上下文：告訴 Claude 該做什麼（而不只是說不能做什麼）
+  const guidanceContext = buildGuidanceContext(result);
 
   writeHookOutput({
     continue: false,
@@ -287,7 +394,8 @@ async function main() {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'deny',
-      permissionDecisionReason: result.reason
+      permissionDecisionReason: result.reason,
+      additionalContext: guidanceContext
     }
   });
 }
@@ -299,10 +407,13 @@ async function main() {
 module.exports = {
   ALLOWED_TOOLS,
   EXECUTION_TOOLS,
+  CLASSIFICATION_TTL,
   checkAutoFixMode,
+  checkClassificationFallback,
   checkRoutingState,
   evaluateRouting,
-  buildDenyMessage
+  buildDenyMessage,
+  buildGuidanceContext
 };
 
 if (require.main === module) {

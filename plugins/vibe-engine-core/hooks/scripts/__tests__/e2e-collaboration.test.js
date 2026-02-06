@@ -25,7 +25,7 @@
  * T. 真實語料分類測試（34 條中文口語化 prompt 準確率 + 邊界案例 + 進程管道驗證）
  * U. 混合分類器測試（三層架構、LLM mock、fallback、快取、config 控制、向後相容）
  * V. Task Tool Validator（PreToolUse hook 驗證 subagent_type 是否符合路由計劃）
- * W. 雙層防禦架構驗證（雙通道輸出、auto-fix bypass、routing progress、budget 強制）
+ * W. 雙層防禦架構驗證（雙通道輸出、auto-fix bypass、routing progress、budget 強制、classification fallback）
  */
 
 const path = require('path');
@@ -3838,6 +3838,165 @@ async function testDualLayerDefense() {
       }
     } catch (err) {
       console.log(`❌ W6 錯誤: ${err.message}`);
+    }
+
+    // ────────────────────────────────────────────
+    // W7: Classification Fallback + 雙效 deny
+    // ────────────────────────────────────────────
+    try {
+      console.log('\n📋 W7: Classification Fallback + 雙效 deny');
+
+      if (!routingEnforcer) {
+        console.log('⚠️  routing-enforcer 模組未載入，跳過 W7');
+      } else {
+      const { evaluateRouting: evalRouting, buildDenyMessage: buildDeny,
+              checkClassificationFallback, CLASSIFICATION_TTL, buildGuidanceContext } = routingEnforcer;
+
+      // 確保 routing-state.json 不存在
+      const routingStatePath = path.join(tempDir, '.vibe-engine', 'routing-state.json');
+      try { fs.unlinkSync(routingStatePath); } catch (e) { /* ok */ }
+
+      // 清除 auto-fix state
+      const autoFixPath = path.join(tempDir, '.vibe-engine', 'auto-fix-state.json');
+      try { fs.unlinkSync(autoFixPath); } catch (e) { /* ok */ }
+      assert(
+        typeof checkClassificationFallback === 'function',
+        'W7.1 checkClassificationFallback 函數已導出',
+        `type: ${typeof checkClassificationFallback}`
+      );
+
+      // W7.2 沒有 classification 時返回 null
+      const classPath = path.join(tempDir, '.vibe-engine', 'last-classification.json');
+      try { fs.unlinkSync(classPath); } catch (e) { /* ok */ }
+      const noClassResult = checkClassificationFallback();
+      assert(
+        noClassResult === null,
+        'W7.2 沒有 classification 時返回 null',
+        `result: ${JSON.stringify(noClassResult)}`
+      );
+
+      // W7.3 有新鮮的 complex classification → fallback 啟動
+      fs.writeFileSync(classPath, JSON.stringify({
+        complexity: 'complex',
+        requestType: 'action',
+        suggestedAgent: 'architect',
+        timestamp: Date.now()
+      }));
+      const complexFallback = checkClassificationFallback();
+      assert(
+        complexFallback !== null && complexFallback.suggestedAgent === 'architect',
+        'W7.3 新鮮 complex classification 觸發 fallback',
+        `result: ${JSON.stringify(complexFallback)}`
+      );
+
+      // W7.4 過期 classification → 不觸發 fallback
+      fs.writeFileSync(classPath, JSON.stringify({
+        complexity: 'complex',
+        timestamp: Date.now() - 60000 // 60 秒前
+      }));
+      const expiredFallback = checkClassificationFallback();
+      assert(
+        expiredFallback === null,
+        'W7.4 過期 classification 不觸發 fallback',
+        `result: ${JSON.stringify(expiredFallback)}`
+      );
+
+      // W7.5 moderate classification → 不觸發 fallback（只有 complex 才觸發）
+      fs.writeFileSync(classPath, JSON.stringify({
+        complexity: 'moderate',
+        timestamp: Date.now()
+      }));
+      const moderateFallback = checkClassificationFallback();
+      assert(
+        moderateFallback === null,
+        'W7.5 moderate classification 不觸發 fallback',
+        `result: ${JSON.stringify(moderateFallback)}`
+      );
+
+      // W7.6 沒有 timestamp 的 classification → 不觸發 fallback
+      fs.writeFileSync(classPath, JSON.stringify({
+        complexity: 'complex'
+        // 沒有 timestamp
+      }));
+      const noTimestampFallback = checkClassificationFallback();
+      assert(
+        noTimestampFallback === null,
+        'W7.6 沒有 timestamp 的 classification 不觸發 fallback',
+        `result: ${JSON.stringify(noTimestampFallback)}`
+      );
+
+      // W7.7 evaluateRouting 整合測試：無 routing-state + 有 complex classification → deny
+      fs.writeFileSync(classPath, JSON.stringify({
+        complexity: 'complex',
+        suggestedAgent: 'architect',
+        timestamp: Date.now()
+      }));
+      const writeWithComplex = evalRouting({ tool_name: 'Write' });
+      assert(
+        writeWithComplex.decision === 'deny',
+        'W7.7 Write 在 complex fallback 時被 deny',
+        `decision: ${writeWithComplex.decision}`
+      );
+      assert(
+        writeWithComplex.classificationFallback === true,
+        'W7.7b classificationFallback 標記存在',
+        `flag: ${writeWithComplex.classificationFallback}`
+      );
+
+      // W7.8 Bash 也被 classification fallback deny
+      const bashWithComplex = evalRouting({ tool_name: 'Bash' });
+      assert(
+        bashWithComplex.decision === 'deny' && bashWithComplex.classificationFallback === true,
+        'W7.8 Bash 在 complex fallback 時被 deny',
+        `decision: ${bashWithComplex.decision}`
+      );
+
+      // W7.9 buildDenyMessage 包含 classification fallback 訊息
+      const fallbackMsg = buildDeny({
+        classificationFallback: true,
+        suggestedAgent: 'architect'
+      });
+      assert(
+        fallbackMsg.includes('Classification Fallback') && fallbackMsg.includes('architect'),
+        'W7.9 fallback deny 訊息包含關鍵字',
+        `includes: Classification Fallback=${fallbackMsg.includes('Classification Fallback')}, architect=${fallbackMsg.includes('architect')}`
+      );
+
+      // W7.10 buildGuidanceContext 為不同 deny 類型生成不同引導
+      assert(
+        typeof buildGuidanceContext === 'function',
+        'W7.10a buildGuidanceContext 函數已導出',
+        `type: ${typeof buildGuidanceContext}`
+      );
+      const unconditionalGuidance = buildGuidanceContext({ unconditionalBlock: true });
+      assert(
+        unconditionalGuidance.includes('EnterPlanMode') && unconditionalGuidance.includes('architect'),
+        'W7.10b 無條件阻擋引導包含 EnterPlanMode 和 architect',
+        `guidance: ${unconditionalGuidance.substring(0, 80)}`
+      );
+      const fallbackGuidance = buildGuidanceContext({ classificationFallback: true, suggestedAgent: 'architect' });
+      assert(
+        fallbackGuidance.includes('complex') && fallbackGuidance.includes('architect'),
+        'W7.10c fallback 引導包含 complex 和 architect',
+        `guidance: ${fallbackGuidance.substring(0, 80)}`
+      );
+      const routingGuidance = buildGuidanceContext({ delegateTo: 'developer' });
+      assert(
+        routingGuidance.includes('developer'),
+        'W7.10d 路由引導包含指定 agent',
+        `guidance: ${routingGuidance.substring(0, 80)}`
+      );
+
+      // W7.11 CLASSIFICATION_TTL 常數已導出且合理
+      assert(
+        typeof CLASSIFICATION_TTL === 'number' && CLASSIFICATION_TTL > 0 && CLASSIFICATION_TTL <= 60000,
+        'W7.11 CLASSIFICATION_TTL 合理（0-60s）',
+        `TTL: ${CLASSIFICATION_TTL}`
+      );
+
+      } // end if (routingEnforcer)
+    } catch (err) {
+      console.log(`❌ W7 錯誤: ${err.message}`);
     }
 
   } finally {

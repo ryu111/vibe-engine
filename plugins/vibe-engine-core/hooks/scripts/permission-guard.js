@@ -79,7 +79,7 @@ function evaluatePermission(hookInput) {
     }
   }
 
-  // 構建輸出
+  // 構建輸出 — 雙效：deny/ask + additionalContext
   const output = {
     continue: decision !== 'deny',
     suppressOutput: false,
@@ -92,8 +92,10 @@ function evaluatePermission(hookInput) {
 
   if (decision === 'deny') {
     output.systemMessage = `⛔ BLOCK: ${reason}. This operation is FORBIDDEN and has been blocked. MUST NOT attempt to bypass this security check.`;
+    output.hookSpecificOutput.additionalContext = 'MANDATORY: This command is blocked by security policy. Use a safer alternative. Do NOT attempt to bypass — rm -rf, git reset --hard, fork bombs, and similar destructive commands are permanently forbidden.';
   } else if (decision === 'ask') {
     output.systemMessage = `⛔ CRITICAL: ${reason}. MUST get explicit user approval before proceeding. Do NOT modify sensitive files without confirmation.`;
+    output.hookSpecificOutput.additionalContext = 'This operation affects sensitive files. You MUST ask the user for explicit confirmation before proceeding. Explain what will be changed and why.';
   } else if (warnings.length > 0) {
     output.systemMessage = `[Permission Guard] ⚠️ Warnings: ${warnings.join('; ')}`;
   }

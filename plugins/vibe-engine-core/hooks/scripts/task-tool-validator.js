@@ -244,6 +244,8 @@ async function main() {
     planId: result.planId
   });
 
+  // 雙效：deny + additionalContext — 告訴 Claude 正確的 agent type
+  const expectedList = (result.expectedAgents || []).join(', ');
   writeHookOutput({
     continue: false,
     suppressOutput: false,
@@ -251,7 +253,8 @@ async function main() {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'deny',
-      permissionDecisionReason: result.reason
+      permissionDecisionReason: result.reason,
+      additionalContext: `MANDATORY: The routing plan expects agent type: ${expectedList}. Use Task tool with the correct subagent_type matching the routing plan. Current attempt used "${result.actualAgent}" which is not in the expected list.`
     }
   });
 }

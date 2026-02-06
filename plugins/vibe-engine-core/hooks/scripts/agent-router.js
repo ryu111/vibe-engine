@@ -590,5 +590,18 @@ module.exports = {
 
 // 執行
 if (require.main === module) {
-  main().catch(console.error);
+  main().catch(error => {
+    // ★ 錯誤時必須輸出合法 JSON — 否則 hook 被視為無輸出
+    // 同時用雙通道引導 Claude 委派而非直接執行
+    const errorMessage = `[Agent Router] Error: ${error.message}. Complex tasks should still be delegated to appropriate agents using Task tool.`;
+    console.log(JSON.stringify({
+      continue: true,
+      suppressOutput: false,
+      systemMessage: errorMessage,
+      hookSpecificOutput: {
+        hookEventName: 'UserPromptSubmit',
+        additionalContext: errorMessage
+      }
+    }));
+  });
 }
