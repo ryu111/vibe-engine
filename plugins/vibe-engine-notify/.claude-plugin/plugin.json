@@ -1,11 +1,15 @@
 {
   "name": "vibe-engine-notify",
-  "version": "0.1.0",
-  "description": "Telegram notification for Vibe Engine task completion",
-  "author": "Vibe Engine Team",
-  "repository": "https://github.com/user/vibe-engine",
-  "entrypoint": "CLAUDE.md",
-  "dependencies": {
-    "plugins": ["vibe-engine-core"]
-  }
+  "version": "0.6.5",
+  "description": "Vibe Engine 通知模組 - Telegram 任務完成通知",
+  "author": {
+    "name": "Vibe Engine Team"
+  },
+  "repository": "https://github.com/ryu111/vibe-engine",
+  "license": "MIT",
+  "keywords": [
+    "vibe-engineering",
+    "notification",
+    "telegram"
+  ]
 }

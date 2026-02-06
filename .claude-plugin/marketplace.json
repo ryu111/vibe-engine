@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "vibe-engine",
-  "version": "0.6.0",
+  "version": "0.6.5",
   "description": "Vibe Engine - Claude Code Plugin for systematic AI workflow infrastructure",
   "owner": {
     "name": "Vibe Engine Team"
@@ -9,20 +9,32 @@
   "plugins": [
     {
       "name": "vibe-engine-core",
-      "description": "核心協調引擎，包含 5 個 agents、5 個 skills、10 個 hooks、4 個 commands",
+      "description": "核心協調引擎 - 多代理路由、任務分解、驗證協議（5 agents、5 skills、5 commands）",
       "source": "./plugins/vibe-engine-core",
       "category": "development"
     },
     {
       "name": "vibe-engine-guarantee",
-      "description": "保障模組，包含 1 個 agent、3 個 skills、2 個 hooks、1 個 command",
+      "description": "保障模組 - 錯誤恢復、自動修復循環、熔斷器、健康檢查（1 agent、3 skills、1 command）",
       "source": "./plugins/vibe-engine-guarantee",
       "category": "development"
     },
     {
       "name": "vibe-engine-memory",
-      "description": "記憶模組，包含 2 個 agents、3 個 skills、5 個 commands、3 個 hooks",
+      "description": "記憶模組 - 三層記憶架構、Instinct Learning、Checkpoint 管理（2 agents、3 skills、6 commands）",
       "source": "./plugins/vibe-engine-memory",
+      "category": "development"
+    },
+    {
+      "name": "vibe-engine-dashboard",
+      "description": "可觀測性面板 - TUI Dashboard、即時指標監控（1 agent、1 skill、2 commands）",
+      "source": "./plugins/vibe-engine-dashboard",
+      "category": "development"
+    },
+    {
+      "name": "vibe-engine-notify",
+      "description": "通知模組 - Telegram 任務完成通知（1 command）",
+      "source": "./plugins/vibe-engine-notify",
       "category": "development"
     }
   ]
