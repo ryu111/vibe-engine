@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>冰火人 - 雙人合作遊戲</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: #222;
+            font-family: Arial, sans-serif;
+        }
+
+        h1 {
+            color: #fff;
+            margin: 0 0 10px 0;
+        }
+
+        #gameContainer {
+            position: relative;
+            border: 3px solid #333;
+            background: linear-gradient(to bottom, #87CEEB 0%, #E0F6FF 100%);
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        canvas {
+            display: block;
+            image-rendering: pixelated;
+        }
+
+        .info {
+            color: #fff;
+            margin-top: 15px;
+            text-align: center;
+            font-size: 14px;
+        }
+
+        .controls {
+            color: #ccc;
+            margin-top: 10px;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        .status {
+            color: #ffff00;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        .red { color: #ff4444; }
+        .blue { color: #4488ff; }
+        .gem { color: #ffdd00; }
+    </style>
+</head>
+<body>
+    <h1>🔥❄️ 冰火人 - 雙人合作遊戲</h1>
+
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="800" height="500"></canvas>
+    </div>
+
+    <div class="info">
+        <div class="controls">
+            <div><span class="red">火男孩</span>：W 跳躍 | A 左 | D 右</div>
+            <div><span class="blue">水女孩</span>：↑ 跳躍 | ← 左 | → 右</div>
+            <div>R 重新開始 | 空格鍵 暫停</div>
+        </div>
+        <div id="status" class="status">等待開始...</div>
+        <div id="score" class="status">第 1 關 | 得分：0</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // 遊戲常數
+        const GRAVITY = 0.6;
+        const JUMP_STRENGTH = 12;
+        const MOVE_SPEED = 5;
+        const FRICTION = 0.85;
+
+        // 玩家物件
+        const player1 = {
+            x: 50,
+            y: 300,
+            width: 20,
+            height: 30,
+            vx: 0,
+            vy: 0,
+            color: '#ff4444',
+            isJumping: true,
+            keys: { w: false, a: false, d: false }
+        };
+
+        const player2 = {
+            x: 700,
+            y: 300,
+            width: 20,
+            height: 30,
+            vx: 0,
+            vy: 0,
+            color: '#4488ff',
+            isJumping: true,
+            keys: { up: false, left: false, right: false }
+        };
+
+        // 遊戲狀態
+        let gameState = {
+            currentLevel: 1,
+            score: 0,
+            isPaused: false,
+            isGameOver: false,
+            levelComplete: false,
+            gameWon: false,
+            level1Gems: 0,
+            level2Gems: 0,
+            level3Gems: 0
+        };
+
+        // 關卡設計
+        const levels = [
+            {
+                platforms: [
+                    { x: 0, y: 480, w: 800, h: 20 }, // 底部地面
+                    { x: 100, y: 380, w: 150, h: 15 },
+                    { x: 550, y: 380, w: 150, h: 15 },
+                    { x: 50, y: 280, w: 150, h: 15 },
+                    { x: 600, y: 280, w: 150, h: 15 },
+                    { x: 300, y: 180, w: 200, h: 15 }
+                ],
+                lava: [
+                    { x: 0, y: 450, w: 250, h: 30 },  // 左邊熔岩
+                    { x: 550, y: 450, w: 250, h: 30 }  // 右邊熔岩
+                ],
+                water: [
+                    { x: 250, y: 450, w: 300, h: 30 }  // 中間水池
+                ],
+                poison: [
+                    { x: 300, y: 350, w: 50, h: 50 }   // 毒液
+                ],
+                gems: [
+                    { x: 120, y: 350, color: '#ff6666', type: 'fire' },
+                    { x: 620, y: 350, color: '#6688ff', type: 'water' },
+                    { x: 375, y: 130, color: '#ffff44', type: 'bonus' }
+                ],
+                fireExit: { x: 30, y: 420, w: 30, h: 60 },
+                waterExit: { x: 740, y: 420, w: 30, h: 60 },
+                startText: '第 1 關：避開中央毒液'
+            },
+            {
+                platforms: [
+                    { x: 0, y: 480, w: 800, h: 20 },
+                    { x: 100, y: 390, w: 120, h: 15 },
+                    { x: 580, y: 390, w: 120, h: 15 },
+                    { x: 250, y: 300, w: 100, h: 15 },
+                    { x: 450, y: 300, w: 100, h: 15 },
+                    { x: 150, y: 210, w: 150, h: 15 },
+                    { x: 500, y: 210, w: 150, h: 15 },
+                    { x: 350, y: 120, w: 100, h: 15 }
+                ],
+                lava: [
+                    { x: 0, y: 450, w: 200, h: 30 }
+                ],
+                water: [
+                    { x: 600, y: 450, w: 200, h: 30 }
+                ],
+                poison: [
+                    { x: 300, y: 260, w: 40, h: 40 },
+                    { x: 460, y: 260, w: 40, h: 40 }
+                ],
+                gems: [
+                    { x: 120, y: 360, color: '#ff6666', type: 'fire' },
+                    { x: 620, y: 360, color: '#6688ff', type: 'water' },
+                    { x: 380, y: 80, color: '#ffff44', type: 'bonus' }
+                ],
+                fireExit: { x: 30, y: 420, w: 30, h: 60 },
+                waterExit: { x: 740, y: 420, w: 30, h: 60 },
+                startText: '第 2 關：上升到頂部'
+            },
+            {
+                platforms: [
+                    { x: 0, y: 480, w: 800, h: 20 },
+                    { x: 80, y: 390, w: 100, h: 15 },
+                    { x: 620, y: 390, w: 100, h: 15 },
+                    { x: 200, y: 320, w: 80, h: 15 },
+                    { x: 520, y: 320, w: 80, h: 15 },
+                    { x: 100, y: 250, w: 120, h: 15 },
+                    { x: 580, y: 250, w: 120, h: 15 },
+                    { x: 280, y: 180, w: 90, h: 15 },
+                    { x: 430, y: 180, w: 90, h: 15 },
+                    { x: 350, y: 100, w: 100, h: 15 }
+                ],
+                lava: [
+                    { x: 0, y: 450, w: 180, h: 30 },
+                    { x: 350, y: 330, w: 100, h: 30 }
+                ],
+                water: [
+                    { x: 620, y: 450, w: 180, h: 30 },
+                    { x: 350, y: 260, w: 100, h: 30 }
+                ],
+                poison: [
+                    { x: 220, y: 280, w: 50, h: 50 },
+                    { x: 530, y: 280, w: 50, h: 50 }
+                ],
+                gems: [
+                    { x: 100, y: 360, color: '#ff6666', type: 'fire' },
+                    { x: 650, y: 360, color: '#6688ff', type: 'water' },
+                    { x: 400, y: 60, color: '#ffff44', type: 'bonus' }
+                ],
+                fireExit: { x: 30, y: 420, w: 30, h: 60 },
+                waterExit: { x: 740, y: 420, w: 30, h: 60 },
+                startText: '第 3 關：最終挑戰'
+            }
+        ];
+
+        let currentLevel = levels[0];
+        let collectedGems = [];
+
+        // 鍵盤輸入
+        window.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            if (key === 'w') player1.keys.w = true;
+            if (key === 'a') player1.keys.a = true;
+            if (key === 'd') player1.keys.d = true;
+            if (key === 'arrowup') player2.keys.up = true;
+            if (key === 'arrowleft') player2.keys.left = true;
+            if (key === 'arrowright') player2.keys.right = true;
+            if (key === ' ') {
+                e.preventDefault();
+                gameState.isPaused = !gameState.isPaused;
+            }
+            if (key === 'r') {
+                e.preventDefault();
+                restartLevel();
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            const key = e.key.toLowerCase();
+            if (key === 'w') player1.keys.w = false;
+            if (key === 'a') player1.keys.a = false;
+            if (key === 'd') player1.keys.d = false;
+            if (key === 'arrowup') player2.keys.up = false;
+            if (key === 'arrowleft') player2.keys.left = false;
+            if (key === 'arrowright') player2.keys.right = false;
+        });
+
+        function updatePlayer(player, moveLeft, moveRight, jump) {
+            // 橫向移動
+            if (moveLeft) player.vx = -MOVE_SPEED;
+            else if (moveRight) player.vx = MOVE_SPEED;
+            else player.vx *= FRICTION;
+
+            // 重力
+            player.vy += GRAVITY;
+
+            // 限制下落速度
+            if (player.vy > 15) player.vy = 15;
+
+            // 更新位置
+            player.x += player.vx;
+            player.y += player.vy;
+
+            // 邊界碰撞
+            if (player.x < 0) player.x = 0;
+            if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
+
+            // 掉出舞台
+            if (player.y > canvas.height) {
+                playerDeath(player);
+                return;
+            }
+
+            // 平台碰撞
+            let onPlatform = false;
+            for (let platform of currentLevel.platforms) {
+                if (checkCollision(player, platform)) {
+                    if (player.vy > 0) {
+                        player.y = platform.y - player.height;
+                        player.vy = 0;
+                        player.isJumping = false;
+                        onPlatform = true;
+                    }
+                }
+            }
+
+            // 檢查危險區域
+            // 火男孩碰到水或毒液
+            if (player === player1) {
+                for (let water of currentLevel.water) {
+                    if (checkCollision(player, water)) {
+                        playerDeath(player);
+                        return;
+                    }
+                }
+                for (let poison of currentLevel.poison) {
+                    if (checkCollision(player, poison)) {
+                        playerDeath(player);
+                        return;
+                    }
+                }
+            }
+
+            // 水女孩碰到熔岩或毒液
+            if (player === player2) {
+                for (let lava of currentLevel.lava) {
+                    if (checkCollision(player, lava)) {
+                        playerDeath(player);
+                        return;
+                    }
+                }
+                for (let poison of currentLevel.poison) {
+                    if (checkCollision(player, poison)) {
+                        playerDeath(player);
+                        return;
+                    }
+                }
+            }
+
+            // 跳躍
+            if (jump && !player.isJumping) {
+                player.vy = -JUMP_STRENGTH;
+                player.isJumping = true;
+            }
+
+            // 檢查寶石收集
+            for (let i = currentLevel.gems.length - 1; i >= 0; i--) {
+                let gem = currentLevel.gems[i];
+                if (checkGemCollision(player, gem)) {
+                    let gemIndex = JSON.stringify(gem);
+                    if (!collectedGems.includes(gemIndex)) {
+                        collectedGems.push(gemIndex);
+                        gameState.score += 10;
+                        currentLevel.gems.splice(i, 1);
+                    }
+                }
+            }
+
+            // 檢查出口
+            if (player === player1 && checkCollision(player, currentLevel.fireExit)) {
+                player1.atExit = true;
+            }
+            if (player === player2 && checkCollision(player, currentLevel.waterExit)) {
+                player2.atExit = true;
+            }
+        }
+
+        function update() {
+            if (gameState.isPaused || gameState.isGameOver) return;
+
+            player1.atExit = false;
+            player2.atExit = false;
+
+            updatePlayer(
+                player1,
+                player1.keys.a,
+                player1.keys.d,
+                player1.keys.w
+            );
+
+            updatePlayer(
+                player2,
+                player2.keys.left,
+                player2.keys.right,
+                player2.keys.up
+            );
+
+            // 檢查過關條件
+            if (player1.atExit && player2.atExit) {
+                levelComplete();
+            }
+        }
+
+        function checkCollision(player, object) {
+            return player.x < object.x + object.w &&
+                   player.x + player.width > object.x &&
+                   player.y < object.y + object.h &&
+                   player.y + player.height > object.y;
+        }
+
+        function checkGemCollision(player, gem) {
+            let gemRadius = 8;
+            let playerCenterX = player.x + player.width / 2;
+            let playerCenterY = player.y + player.height / 2;
+            let dx = playerCenterX - gem.x;
+            let dy = playerCenterY - gem.y;
+            return Math.sqrt(dx * dx + dy * dy) < gemRadius + 10;
+        }
+
+        function playerDeath(player) {
+            gameState.isGameOver = true;
+            updateStatus(`${player === player1 ? '火男孩' : '水女孩'} 死亡！ 按 R 重新開始`);
+        }
+
+        function levelComplete() {
+            gameState.levelComplete = true;
+            if (gameState.currentLevel === 3) {
+                gameState.gameWon = true;
+                updateStatus(`恭喜！ 您贏了！ 總得分：${gameState.score} | 按 R 重新開始`);
+            } else {
+                updateStatus(`第 ${gameState.currentLevel} 關完成！ 按 R 進入下一關`);
+            }
+        }
+
+        function restartLevel() {
+            if (gameState.levelComplete) {
+                if (gameState.gameWon) {
+                    // 重新開始遊戲
+                    gameState.currentLevel = 1;
+                    gameState.score = 0;
+                    gameState.gameWon = false;
+                    collectedGems = [];
+                } else {
+                    // 進入下一關
+                    gameState.currentLevel++;
+                }
+                currentLevel = levels[gameState.currentLevel - 1];
+            }
+
+            gameState.isGameOver = false;
+            gameState.levelComplete = false;
+            gameState.isPaused = false;
+
+            player1.x = 50;
+            player1.y = 300;
+            player1.vx = 0;
+            player1.vy = 0;
+            player1.isJumping = true;
+            player1.atExit = false;
+
+            player2.x = 700;
+            player2.y = 300;
+            player2.vx = 0;
+            player2.vy = 0;
+            player2.isJumping = true;
+            player2.atExit = false;
+
+            updateStatus(`${currentLevel.startText} - 按 W/↑ 跳躍開始`);
+        }
+
+        function draw() {
+            // 清空畫布
+            ctx.fillStyle = '#87CEEB';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 繪製平台
+            ctx.fillStyle = '#8B7355';
+            for (let platform of currentLevel.platforms) {
+                ctx.fillRect(platform.x, platform.y, platform.w, platform.h);
+                ctx.strokeStyle = '#5D4E37';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(platform.x, platform.y, platform.w, platform.h);
+            }
+
+            // 繪製熔岩
+            ctx.fillStyle = '#FF6600';
+            for (let lava of currentLevel.lava) {
+                ctx.fillRect(lava.x, lava.y, lava.w, lava.h);
+                // 動畫效果
+                ctx.fillStyle = '#FF8800';
+                for (let i = 0; i < 3; i++) {
+                    ctx.fillRect(
+                        lava.x + i * 30,
+                        lava.y + (Math.sin(Date.now() / 300 + i) * 5),
+                        15,
+                        lava.h
+                    );
+                }
+                ctx.fillStyle = '#FF6600';
+            }
+
+            // 繪製水池
+            ctx.fillStyle = '#0099FF';
+            for (let water of currentLevel.water) {
+                ctx.fillRect(water.x, water.y, water.w, water.h);
+                // 波浪效果
+                ctx.fillStyle = '#00CCFF';
+                for (let i = 0; i < 3; i++) {
+                    ctx.fillRect(
+                        water.x + i * 30,
+                        water.y + (Math.sin(Date.now() / 300 + i) * 5),
+                        15,
+                        water.h
+                    );
+                }
+                ctx.fillStyle = '#0099FF';
+            }
+
+            // 繪製毒液
+            ctx.fillStyle = '#00CC00';
+            for (let poison of currentLevel.poison) {
+                ctx.fillRect(poison.x, poison.y, poison.w, poison.h);
+                // 毒液紋理
+                ctx.fillStyle = '#00FF00';
+                ctx.font = '20px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('☠', poison.x + poison.w / 2, poison.y + poison.h / 2);
+                ctx.fillStyle = '#00CC00';
+            }
+
+            // 繪製出口
+            // 火出口（紅色門）
+            ctx.fillStyle = '#DD0000';
+            ctx.fillRect(currentLevel.fireExit.x, currentLevel.fireExit.y, currentLevel.fireExit.w, currentLevel.fireExit.h);
+            ctx.fillStyle = '#FF0000';
+            ctx.font = 'bold 16px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('🔥', currentLevel.fireExit.x + 15, currentLevel.fireExit.y + 30);
+
+            // 水出口（藍色門）
+            ctx.fillStyle = '#0000DD';
+            ctx.fillRect(currentLevel.waterExit.x, currentLevel.waterExit.y, currentLevel.waterExit.w, currentLevel.waterExit.h);
+            ctx.fillStyle = '#0000FF';
+            ctx.fillText('❄️', currentLevel.waterExit.x + 15, currentLevel.waterExit.y + 30);
+
+            // 繪製寶石
+            for (let gem of currentLevel.gems) {
+                ctx.fillStyle = gem.color;
+                ctx.beginPath();
+                ctx.arc(gem.x, gem.y, 8, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+
+            // 繪製玩家
+            drawPlayer(player1);
+            drawPlayer(player2);
+
+            // 繪製暫停文字
+            if (gameState.isPaused) {
+                ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 40px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('暫停中', canvas.width / 2, canvas.height / 2);
+            }
+        }
+
+        function drawPlayer(player) {
+            // 身體
+            ctx.fillStyle = player.color;
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+
+            // 邊框
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(player.x, player.y, player.width, player.height);
+
+            // 眼睛
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(player.x + 6, player.y + 8, 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(player.x + 14, player.y + 8, 2, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 標籤
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 10px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText(player === player1 ? '火' : '水', player.x + 10, player.y - 12);
+        }
+
+        function updateStatus(text) {
+            document.getElementById('status').textContent = text;
+            document.getElementById('score').textContent = `第 ${gameState.currentLevel} 關 | 得分：${gameState.score}`;
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // 初始化
+        updateStatus('第 1 關：避開中央毒液 - 按 W/↑ 跳躍開始');
+        gameLoop();
+    </script>
+</body>
+</html>

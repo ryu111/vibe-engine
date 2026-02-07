@@ -228,6 +228,22 @@ const STRUCTURAL_FEATURES = {
           && prompt.length <= 50;
       },
       confidence: 0.9
+    },
+    {
+      name: 'conversational_acknowledgment',
+      test: (prompt, metrics, _sanitized) => {
+        const ACK_RE = /^(?:好|好了|好的|OK|ok|行|可以|收到|了解|知道了|知道|嗯|對|是的|沒問題|沒事|謝謝|感謝|thank|yes|no|不|不要|不用|算了|等等|停|sure|got it)/iu;
+        return ACK_RE.test(prompt.trim()) && metrics.wordCount <= 30;
+      },
+      confidence: 0.9
+    },
+    {
+      name: 'no_action_no_product',
+      test: (_prompt, metrics, sanitized) => {
+        // 完全沒有動作動詞也沒有產品名詞 → 對話/回饋性質
+        return !ACTION_VERB_RE.test(sanitized) && !PRODUCT_NOUN_RE.test(sanitized) && !metrics.hasMultipleSteps;
+      },
+      confidence: 0.85
     }
   ],
 

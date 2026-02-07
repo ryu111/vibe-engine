@@ -80,6 +80,15 @@ const AGENTS = {
   }
 };
 
+// Agent Emoji 映射（用於透明性展示）
+const AGENT_EMOJI = {
+  architect: '🏗️',
+  developer: '👨‍💻',
+  tester: '🧪',
+  reviewer: '👀',
+  explorer: '🔍'
+};
+
 // 路由規則
 const ROUTING_RULES = {
   // 直接回答條件（不委派）
@@ -438,21 +447,17 @@ function generateRoutingDirective(plan, planId, originalRequest) {
   const totalTasks = plan.phases.reduce((s, p) => s + p.tasks.length, 0);
   lines.push('### 透明性展示（MUST 在 dispatch 前向用戶展示）');
   lines.push('');
-  lines.push('在 dispatch 任何 agent 之前，**必須**先向用戶展示路由計劃摘要：');
-  lines.push('```');
-  lines.push('[CHECKPOINT] Task Decomposition');
-  lines.push('├─ 原始請求：[用你自己的話簡述用戶的需求]');
-  lines.push(`├─ 策略：${plan.strategy}`);
-  lines.push(`├─ 子任務數量：${totalTasks}`);
-  lines.push(`├─ 執行階段：${plan.phases.length} phases`);
-  lines.push('├─ 計劃：');
+  lines.push('在 dispatch 任何 agent 之前，**必須**先向用戶展示以下路由計劃摘要：');
+  lines.push('');
+  lines.push(`## 🎯 router 收到請求，分解為 ${totalTasks} 個子任務`);
+  lines.push('');
   for (const ph of plan.phases) {
     for (const t of ph.tasks) {
-      lines.push(`│   Phase ${ph.phase} │ ${t.agent.padEnd(10)} │ ${t.description.slice(0, 30)} │ ${t.model}`);
+      const emoji = AGENT_EMOJI[t.agent] || '🤖';
+      const actionDesc = t.description.split(/[:：]/)[0];
+      lines.push(`## ${emoji} ${t.agent} ${actionDesc}`);
     }
   }
-  lines.push('└─ 開始執行 Phase 1');
-  lines.push('```');
   lines.push('');
   lines.push('展示後**立即開始執行**，不需等待用戶確認。');
   lines.push('');

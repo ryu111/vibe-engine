@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>太空侵略者 (Space Invaders)</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            font-family: 'Arial', sans-serif;
+            color: #fff;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .title {
+            font-size: 32px;
+            font-weight: bold;
+            text-shadow: 0 0 10px #00ff41;
+            color: #00ff41;
+        }
+
+        .game-wrapper {
+            position: relative;
+            background: #000;
+            border: 3px solid #00ff41;
+            box-shadow: 0 0 20px #00ff41;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            background: #000 url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect fill="%23000" width="100" height="100"/><circle cx="50" cy="50" r="0.5" fill="%23003300" opacity="0.5"/></svg>');
+            cursor: crosshair;
+        }
+
+        .hud {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 600px;
+            padding: 15px;
+            background: rgba(0, 255, 65, 0.1);
+            border: 2px solid #00ff41;
+            border-top: none;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .hud-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .hud-label {
+            color: #00ff41;
+        }
+
+        .hud-value {
+            color: #fff;
+            min-width: 100px;
+            text-align: right;
+        }
+
+        .controls {
+            width: 600px;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid #00ff41;
+            border-top: none;
+            font-size: 14px;
+            text-align: center;
+            color: #00ff41;
+        }
+
+        .controls p {
+            margin: 5px 0;
+        }
+
+        .game-over {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.95);
+            padding: 30px;
+            border: 3px solid #ff0000;
+            border-radius: 10px;
+            text-align: center;
+            z-index: 100;
+            box-shadow: 0 0 30px #ff0000;
+        }
+
+        .game-over.show {
+            display: block;
+        }
+
+        .game-over h2 {
+            font-size: 36px;
+            margin-bottom: 20px;
+            color: #ff0000;
+            text-shadow: 0 0 10px #ff0000;
+        }
+
+        .game-over p {
+            font-size: 20px;
+            margin-bottom: 10px;
+            color: #00ff41;
+        }
+
+        .game-over .final-score {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 20px 0;
+            color: #ffff00;
+        }
+
+        .next-wave {
+            color: #00ff41;
+        }
+
+        .restart-hint {
+            margin-top: 20px;
+            font-size: 14px;
+            color: #fff;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .pulse {
+            animation: pulse 1s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="title">👾 太空侵略者 👾</div>
+        <div class="game-wrapper">
+            <canvas id="gameCanvas" width="600" height="500"></canvas>
+            <div class="game-over" id="gameOverScreen">
+                <h2 id="gameOverTitle">遊戲結束</h2>
+                <p id="gameOverMessage">你的防禦已被攻破</p>
+                <div class="final-score">
+                    最終分數: <span id="finalScore">0</span>
+                </div>
+                <div id="nextWaveInfo" class="next-wave" style="display: none;">
+                    <p>恭喜！已消滅所有外星人</p>
+                    <p>下一波將更加困難...</p>
+                </div>
+                <div class="restart-hint">
+                    <p>按 <strong>Space</strong> 或 <strong>R</strong> 重新開始</p>
+                </div>
+            </div>
+        </div>
+        <div class="hud">
+            <div class="hud-item">
+                <span class="hud-label">分數:</span>
+                <span class="hud-value" id="score">0</span>
+            </div>
+            <div class="hud-item">
+                <span class="hud-label">最高分:</span>
+                <span class="hud-value" id="highScore">0</span>
+            </div>
+            <div class="hud-item">
+                <span class="hud-label">命數:</span>
+                <span class="hud-value" id="lives">❤️ ❤️ ❤️</span>
+            </div>
+            <div class="hud-item">
+                <span class="hud-label">波次:</span>
+                <span class="hud-value" id="wave">1</span>
+            </div>
+        </div>
+        <div class="controls">
+            <p>🎮 操控：<strong>A/D 鍵</strong> 或 <strong>← → 方向鍵</strong> 移動 | <strong>Space</strong> 射擊</p>
+            <p>目標：消滅所有外星人，保護地球！</p>
+        </div>
+    </div>
+
+    <script>
+        // 遊戲配置
+        const CONFIG = {
+            canvasWidth: 600,
+            canvasHeight: 500,
+            shipWidth: 30,
+            shipHeight: 30,
+            shipColor: '#00ff41',
+            bulletWidth: 3,
+            bulletHeight: 10,
+            bulletSpeed: 7,
+            enemyWidth: 30,
+            enemyHeight: 25,
+            enemyRows: 5,
+            enemyCols: 11,
+            enemySpacing: 50,
+            shieldBlocks: 4,
+            shieldBlockSize: 25,
+            soundEnabled: false
+        };
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // 遊戲狀態
+        let gameState = {
+            score: 0,
+            highScore: localStorage.getItem('spaceInvadersHighScore') || 0,
+            lives: 3,
+            wave: 1,
+            gameOver: false,
+            gameWon: false,
+            paused: false,
+            time: 0
+        };
+
+        // 玩家飛船
+        let player = {
+            x: CONFIG.canvasWidth / 2 - CONFIG.shipWidth / 2,
+            y: CONFIG.canvasHeight - 60,
+            width: CONFIG.shipWidth,
+            height: CONFIG.shipHeight,
+            speed: 6,
+            canShoot: true,
+            shootCooldown: 0
+        };
+
+        // 子彈
+        let playerBullets = [];
+        let enemyBullets = [];
+
+        // 外星人
+        let enemies = [];
+        let enemyDirection = 1;
+        let enemySpeed = 1;
+        let enemyShootInterval = 60;
+        let enemyShootCounter = 0;
+
+        // 防護罩
+        let shields = [];
+
+        // 鍵盤輸入
+        let keys = {
+            ArrowLeft: false,
+            ArrowRight: false,
+            KeyA: false,
+            KeyD: false,
+            Space: false
+        };
+
+        // 初始化遊戲
+        function init() {
+            createEnemies();
+            createShields();
+            gameState.gameOver = false;
+            gameState.gameWon = false;
+            player.x = CONFIG.canvasWidth / 2 - CONFIG.shipWidth / 2;
+            playerBullets = [];
+            enemyBullets = [];
+            enemyDirection = 1;
+            enemySpeed = 1 + gameState.wave * 0.3;
+            document.getElementById('gameOverScreen').classList.remove('show');
+        }
+
+        // 創建外星人隊伍
+        function createEnemies() {
+            enemies = [];
+            const startX = 50;
+            const startY = 30;
+
+            for (let row = 0; row < CONFIG.enemyRows; row++) {
+                for (let col = 0; col < CONFIG.enemyCols; col++) {
+                    const enemy = {
+                        x: startX + col * CONFIG.enemySpacing,
+                        y: startY + row * 50,
+                        width: CONFIG.enemyWidth,
+                        height: CONFIG.enemyHeight,
+                        type: row < 2 ? 'elite' : 'standard',
+                        alive: true
+                    };
+                    enemies.push(enemy);
+                }
+            }
+        }
+
+        // 創建防護罩
+        function createShields() {
+            shields = [];
+            const shieldPositions = [100, 200, 300, 450];
+
+            shieldPositions.forEach(xPos => {
+                const shield = {
+                    x: xPos,
+                    y: CONFIG.canvasHeight - 200,
+                    blocks: []
+                };
+
+                for (let row = 0; row < 3; row++) {
+                    for (let col = 0; col < 4; col++) {
+                        shield.blocks.push({
+                            x: xPos + col * CONFIG.shieldBlockSize,
+                            y: CONFIG.canvasHeight - 200 + row * CONFIG.shieldBlockSize,
+                            size: CONFIG.shieldBlockSize,
+                            health: 1
+                        });
+                    }
+                }
+
+                shields.push(shield);
+            });
+        }
+
+        // 繪製函數
+        function drawPlayer() {
+            ctx.fillStyle = CONFIG.shipColor;
+            ctx.shadowColor = '#00ff41';
+            ctx.shadowBlur = 10;
+
+            // 飛船主體
+            ctx.beginPath();
+            ctx.moveTo(player.x + player.width / 2, player.y);
+            ctx.lineTo(player.x + player.width, player.y + player.height);
+            ctx.lineTo(player.x + player.width - 10, player.y + player.height - 8);
+            ctx.lineTo(player.x + 10, player.y + player.height - 8);
+            ctx.lineTo(player.x, player.y + player.height);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.shadowColor = 'transparent';
+        }
+
+        function drawEnemies() {
+            enemies.forEach(enemy => {
+                if (!enemy.alive) return;
+
+                ctx.fillStyle = enemy.type === 'elite' ? '#ff6b6b' : '#ffff00';
+                ctx.font = '24px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('👾', enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
+            });
+        }
+
+        function drawBullets() {
+            // 玩家子彈
+            ctx.fillStyle = '#00ff41';
+            playerBullets.forEach(bullet => {
+                ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+            });
+
+            // 敵方子彈
+            ctx.fillStyle = '#ff6b6b';
+            enemyBullets.forEach(bullet => {
+                ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+            });
+        }
+
+        function drawShields() {
+            shields.forEach(shield => {
+                shield.blocks.forEach(block => {
+                    if (block.health > 0) {
+                        ctx.fillStyle = '#00aa00';
+                        ctx.globalAlpha = block.health;
+                        ctx.fillRect(block.x, block.y, block.size, block.size);
+                        ctx.globalAlpha = 1;
+                    }
+                });
+            });
+        }
+
+        function drawHUD() {
+            ctx.fillStyle = '#00ff41';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText('Score: ' + gameState.score, 10, 20);
+            ctx.fillText('Lives: ' + gameState.lives, 10, 40);
+
+            const aliveEnemies = enemies.filter(e => e.alive).length;
+            ctx.textAlign = 'right';
+            ctx.fillText('敵人: ' + aliveEnemies, CONFIG.canvasWidth - 10, 20);
+            ctx.fillText('波次: ' + gameState.wave, CONFIG.canvasWidth - 10, 40);
+        }
+
+        // 更新函數
+        function updatePlayer() {
+            const moveLeft = keys.ArrowLeft || keys.KeyA;
+            const moveRight = keys.ArrowRight || keys.KeyD;
+
+            if (moveLeft && player.x > 0) {
+                player.x -= player.speed;
+            }
+            if (moveRight && player.x + player.width < CONFIG.canvasWidth) {
+                player.x += player.speed;
+            }
+
+            if (keys.Space && player.shootCooldown <= 0) {
+                playerBullets.push({
+                    x: player.x + player.width / 2 - CONFIG.bulletWidth / 2,
+                    y: player.y,
+                    width: CONFIG.bulletWidth,
+                    height: CONFIG.bulletHeight,
+                    speed: CONFIG.bulletSpeed
+                });
+                player.shootCooldown = 10;
+            }
+
+            if (player.shootCooldown > 0) {
+                player.shootCooldown--;
+            }
+        }
+
+        function updateBullets() {
+            // 更新玩家子彈
+            playerBullets = playerBullets.filter(bullet => {
+                bullet.y -= bullet.speed;
+                return bullet.y > 0;
+            });
+
+            // 更新敵方子彈
+            enemyBullets = enemyBullets.filter(bullet => {
+                bullet.y += bullet.speed;
+                return bullet.y < CONFIG.canvasHeight;
+            });
+
+            // 檢查碰撞
+            checkCollisions();
+        }
+
+        function updateEnemies() {
+            const moveAmount = 2;
+            let touchEdge = false;
+
+            // 移動敵人
+            enemies.forEach(enemy => {
+                if (!enemy.alive) return;
+                enemy.x += enemyDirection * enemySpeed;
+
+                if (enemy.x <= 0 || enemy.x + enemy.width >= CONFIG.canvasWidth) {
+                    touchEdge = true;
+                }
+
+                // 檢查敵人是否到達底部
+                if (enemy.y + enemy.height >= CONFIG.canvasHeight - 100) {
+                    gameState.gameOver = true;
+                }
+            });
+
+            // 邊界碰撞時下降並改變方向
+            if (touchEdge) {
+                enemyDirection *= -1;
+                enemies.forEach(enemy => {
+                    enemy.y += 40;
+                });
+            }
+
+            // 敵人射擊
+            enemyShootCounter++;
+            if (enemyShootCounter >= enemyShootInterval) {
+                const aliveEnemies = enemies.filter(e => e.alive);
+                if (aliveEnemies.length > 0) {
+                    const shooter = aliveEnemies[Math.floor(Math.random() * aliveEnemies.length)];
+                    enemyBullets.push({
+                        x: shooter.x + shooter.width / 2 - CONFIG.bulletWidth / 2,
+                        y: shooter.y + shooter.height,
+                        width: CONFIG.bulletWidth,
+                        height: CONFIG.bulletHeight,
+                        speed: 4
+                    });
+                }
+                enemyShootCounter = 0;
+                enemyShootInterval = Math.max(30, 60 - gameState.wave * 5);
+            }
+        }
+
+        function checkCollisions() {
+            // 玩家子彈 vs 敵人
+            playerBullets.forEach((bullet, bulletIndex) => {
+                enemies.forEach(enemy => {
+                    if (!enemy.alive) return;
+
+                    if (bullet.x < enemy.x + enemy.width &&
+                        bullet.x + bullet.width > enemy.x &&
+                        bullet.y < enemy.y + enemy.height &&
+                        bullet.y + bullet.height > enemy.y) {
+
+                        enemy.alive = false;
+                        playerBullets.splice(bulletIndex, 1);
+
+                        // 計分（不同列分數不同）
+                        const row = Math.floor((enemy.y - 30) / 50);
+                        const points = [30, 30, 20, 20, 10][row] || 10;
+                        gameState.score += points;
+                    }
+                });
+
+                // 玩家子彈 vs 防護罩
+                shields.forEach(shield => {
+                    shield.blocks.forEach(block => {
+                        if (block.health > 0 &&
+                            bullet.x < block.x + block.size &&
+                            bullet.x + bullet.width > block.x &&
+                            bullet.y < block.y + block.size &&
+                            bullet.y + bullet.height > block.y) {
+
+                            block.health -= 1;
+                            if (bulletIndex >= 0) {
+                                playerBullets.splice(bulletIndex, 1);
+                            }
+                        }
+                    });
+                });
+            });
+
+            // 敵方子彈 vs 玩家
+            enemyBullets.forEach((bullet, bulletIndex) => {
+                if (bullet.x < player.x + player.width &&
+                    bullet.x + bullet.width > player.x &&
+                    bullet.y < player.y + player.height &&
+                    bullet.y + bullet.height > player.y) {
+
+                    gameState.lives--;
+                    enemyBullets.splice(bulletIndex, 1);
+
+                    if (gameState.lives <= 0) {
+                        gameState.gameOver = true;
+                    }
+                }
+            });
+
+            // 敵方子彈 vs 防護罩
+            enemyBullets.forEach((bullet, bulletIndex) => {
+                shields.forEach(shield => {
+                    shield.blocks.forEach(block => {
+                        if (block.health > 0 &&
+                            bullet.x < block.x + block.size &&
+                            bullet.x + bullet.width > block.x &&
+                            bullet.y < block.y + block.size &&
+                            bullet.y + bullet.height > block.y) {
+
+                            block.health -= 1;
+                            if (bulletIndex >= 0) {
+                                enemyBullets.splice(bulletIndex, 1);
+                            }
+                        }
+                    });
+                });
+            });
+        }
+
+        function checkGameState() {
+            const aliveEnemies = enemies.filter(e => e.alive).length;
+
+            if (aliveEnemies === 0 && !gameState.gameWon) {
+                gameState.gameWon = true;
+                gameState.wave++;
+            }
+        }
+
+        // 遊戲循環
+        function gameLoop() {
+            // 清除畫布
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, CONFIG.canvasWidth, CONFIG.canvasHeight);
+
+            if (!gameState.gameOver && !gameState.gameWon) {
+                updatePlayer();
+                updateBullets();
+                updateEnemies();
+                checkGameState();
+            }
+
+            // 繪製所有對象
+            drawShields();
+            drawBullets();
+            drawEnemies();
+            drawPlayer();
+            drawHUD();
+
+            // 顯示遊戲結束畫面
+            if (gameState.gameOver || gameState.gameWon) {
+                showGameOver();
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function showGameOver() {
+            const screen = document.getElementById('gameOverScreen');
+            const titleEl = document.getElementById('gameOverTitle');
+            const messageEl = document.getElementById('gameOverMessage');
+            const nextWaveEl = document.getElementById('nextWaveInfo');
+
+            if (gameState.gameWon) {
+                titleEl.textContent = '波次完成！';
+                titleEl.style.color = '#00ff41';
+                messageEl.textContent = '你成功防禦了入侵';
+                nextWaveEl.style.display = 'block';
+            } else {
+                titleEl.textContent = '遊戲結束';
+                titleEl.style.color = '#ff0000';
+                messageEl.textContent = '你的防禦已被攻破...';
+                nextWaveEl.style.display = 'none';
+            }
+
+            document.getElementById('finalScore').textContent = gameState.score;
+            screen.classList.add('show');
+        }
+
+        // 更新 HUD 顯示
+        function updateHUD() {
+            document.getElementById('score').textContent = gameState.score;
+            document.getElementById('highScore').textContent = gameState.highScore;
+
+            const hearts = '❤️'.repeat(Math.max(0, gameState.lives));
+            document.getElementById('lives').textContent = hearts || '☠️ 已陣亡';
+
+            document.getElementById('wave').textContent = gameState.wave;
+        }
+
+        // 鍵盤事件
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') keys.ArrowLeft = true;
+            if (e.key === 'ArrowRight') keys.ArrowRight = true;
+            if (e.code === 'KeyA') keys.KeyA = true;
+            if (e.code === 'KeyD') keys.KeyD = true;
+            if (e.code === 'Space') {
+                keys.Space = true;
+                e.preventDefault();
+            }
+
+            // 重新開始
+            if ((e.code === 'Space' || e.code === 'KeyR') && (gameState.gameOver || gameState.gameWon)) {
+                gameState.score = 0;
+                gameState.lives = 3;
+                gameState.wave = 1;
+                init();
+                updateHUD();
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft') keys.ArrowLeft = false;
+            if (e.key === 'ArrowRight') keys.ArrowRight = false;
+            if (e.code === 'KeyA') keys.KeyA = false;
+            if (e.code === 'KeyD') keys.KeyD = false;
+            if (e.code === 'Space') keys.Space = false;
+        });
+
+        // 每幀更新 HUD
+        setInterval(updateHUD, 100);
+
+        // 啟動遊戲
+        init();
+        updateHUD();
+        gameLoop();
+    </script>
+</body>
+</html>

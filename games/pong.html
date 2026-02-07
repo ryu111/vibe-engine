@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>乒乓球遊戲 - Pong</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Arial', sans-serif;
+        }
+
+        #container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        h1 {
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            font-size: 2.5em;
+        }
+
+        #gameCanvas {
+            display: block;
+            background: #1a1a1a;
+            border: 4px solid white;
+            border-radius: 8px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            cursor: none;
+        }
+
+        #info {
+            display: flex;
+            gap: 40px;
+            color: white;
+            font-size: 1.1em;
+            text-align: center;
+        }
+
+        .score-box {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px 20px;
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .score-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-bottom: 5px;
+        }
+
+        .score-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #4ade80;
+        }
+
+        #message {
+            color: white;
+            font-size: 1.2em;
+            height: 30px;
+            text-align: center;
+            min-height: 30px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        #controls {
+            color: #cccccc;
+            font-size: 0.95em;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+        }
+
+        .control-item {
+            margin: 5px 0;
+        }
+
+        .key {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+            color: #4ade80;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>🏓 乒乓球遊戲</h1>
+
+        <canvas id="gameCanvas" width="600" height="400"></canvas>
+
+        <div id="info">
+            <div class="score-box">
+                <div class="score-label">你的分數</div>
+                <div class="score-value" id="playerScore">0</div>
+            </div>
+            <div class="score-box">
+                <div class="score-label">AI 分數</div>
+                <div class="score-value" id="aiScore">0</div>
+            </div>
+        </div>
+
+        <div id="message"></div>
+
+        <div id="controls">
+            <div class="control-item"><span class="key">W</span> / <span class="key">S</span> 移動擋板</div>
+            <div class="control-item"><span class="key">Space</span> 開始遊戲</div>
+            <div class="control-item">先到 5 分勝利</div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // 遊戲物件
+        const game = {
+            width: 600,
+            height: 400,
+            playerScore: 0,
+            aiScore: 0,
+            running: false,
+            gameOver: false,
+            winner: null,
+            paused: false
+        };
+
+        // 玩家擋板
+        const player = {
+            x: 20,
+            y: game.height / 2 - 50,
+            width: 12,
+            height: 100,
+            speed: 6,
+            dy: 0
+        };
+
+        // AI 擋板
+        const ai = {
+            x: game.width - 32,
+            y: game.height / 2 - 50,
+            width: 12,
+            height: 100,
+            speed: 4,
+            dy: 0,
+            reactionDelay: 0
+        };
+
+        // 球
+        const ball = {
+            x: game.width / 2,
+            y: game.height / 2,
+            radius: 8,
+            dx: 5,
+            dy: 5,
+            speed: 5,
+            maxSpeed: 8
+        };
+
+        // 鍵盤狀態
+        const keys = {};
+
+        // 事件監聽器
+        window.addEventListener('keydown', (e) => {
+            keys[e.key.toUpperCase()] = true;
+
+            if (e.key === ' ') {
+                e.preventDefault();
+                if (!game.running && !game.gameOver) {
+                    startGame();
+                } else if (game.gameOver) {
+                    resetGame();
+                }
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keys[e.key.toUpperCase()] = false;
+        });
+
+        // 開始遊戲
+        function startGame() {
+            game.running = true;
+            game.paused = false;
+            updateMessage('遊戲開始！');
+            setTimeout(() => updateMessage(''), 1500);
+        }
+
+        // 重置遊戲
+        function resetGame() {
+            game.playerScore = 0;
+            game.aiScore = 0;
+            game.running = false;
+            game.gameOver = false;
+            game.winner = null;
+            player.y = game.height / 2 - 50;
+            ai.y = game.height / 2 - 50;
+            ball.x = game.width / 2;
+            ball.y = game.height / 2;
+            ball.dx = 5;
+            ball.dy = 5;
+            ai.reactionDelay = 0;
+            updateScore();
+            updateMessage('按 Space 開始遊戲');
+        }
+
+        // 更新訊息
+        function updateMessage(msg) {
+            document.getElementById('message').textContent = msg;
+        }
+
+        // 更新分數顯示
+        function updateScore() {
+            document.getElementById('playerScore').textContent = game.playerScore;
+            document.getElementById('aiScore').textContent = game.aiScore;
+        }
+
+        // 檢查勝利
+        function checkWinner() {
+            if (game.playerScore >= 5) {
+                game.gameOver = true;
+                game.winner = 'player';
+                game.running = false;
+                updateMessage('🎉 你贏了！ 按 Space 重新開始');
+                return true;
+            }
+            if (game.aiScore >= 5) {
+                game.gameOver = true;
+                game.winner = 'ai';
+                game.running = false;
+                updateMessage('🤖 AI 贏了！ 按 Space 重新開始');
+                return true;
+            }
+            return false;
+        }
+
+        // 更新玩家擋板位置
+        function updatePlayer() {
+            if (keys['W'] && player.y > 0) {
+                player.y -= player.speed;
+            }
+            if (keys['S'] && player.y < game.height - player.height) {
+                player.y += player.speed;
+            }
+        }
+
+        // 更新 AI 擋板位置（帶延遲）
+        function updateAI() {
+            ai.reactionDelay = (ai.reactionDelay + 1) % 12; // 12 幀延遲
+
+            if (ai.reactionDelay === 0) {
+                const aiCenter = ai.y + ai.height / 2;
+                const distance = ball.y - aiCenter;
+
+                if (Math.abs(distance) > 20) {
+                    if (distance > 0) {
+                        ai.y = Math.min(ai.y + ai.speed, game.height - ai.height);
+                    } else {
+                        ai.y = Math.max(ai.y - ai.speed, 0);
+                    }
+                }
+            }
+        }
+
+        // 更新球位置
+        function updateBall() {
+            ball.x += ball.dx;
+            ball.y += ball.dy;
+
+            // 上下碰撞
+            if (ball.y - ball.radius <= 0 || ball.y + ball.radius >= game.height) {
+                ball.dy = -ball.dy;
+                ball.y = Math.max(ball.radius, Math.min(game.height - ball.radius, ball.y));
+            }
+
+            // 與玩家擋板碰撞
+            if (checkCollisionWithPaddle(player)) {
+                ball.dx = Math.abs(ball.dx);
+                const collidePoint = (ball.y - (player.y + player.height / 2)) / (player.height / 2);
+                ball.dy = collidePoint * ball.maxSpeed;
+                increaseBallSpeed();
+            }
+
+            // 與 AI 擋板碰撞
+            if (checkCollisionWithPaddle(ai)) {
+                ball.dx = -Math.abs(ball.dx);
+                const collidePoint = (ball.y - (ai.y + ai.height / 2)) / (ai.height / 2);
+                ball.dy = collidePoint * ball.maxSpeed;
+                increaseBallSpeed();
+            }
+
+            // 左邊界 - AI 得分
+            if (ball.x - ball.radius < 0) {
+                game.aiScore++;
+                updateScore();
+                if (!checkWinner()) {
+                    resetBall();
+                    updateMessage('AI 得分！');
+                    setTimeout(() => updateMessage(''), 1000);
+                }
+            }
+
+            // 右邊界 - 玩家得分
+            if (ball.x + ball.radius > game.width) {
+                game.playerScore++;
+                updateScore();
+                if (!checkWinner()) {
+                    resetBall();
+                    updateMessage('你得分！');
+                    setTimeout(() => updateMessage(''), 1000);
+                }
+            }
+        }
+
+        // 檢查球與擋板碰撞
+        function checkCollisionWithPaddle(paddle) {
+            return (
+                ball.x - ball.radius <= paddle.x + paddle.width &&
+                ball.x + ball.radius >= paddle.x &&
+                ball.y >= paddle.y &&
+                ball.y <= paddle.y + paddle.height
+            );
+        }
+
+        // 增加球速度
+        function increaseBallSpeed() {
+            const speed = Math.hypot(ball.dx, ball.dy);
+            if (speed < ball.maxSpeed) {
+                ball.dx *= 1.05;
+                ball.dy *= 1.05;
+            }
+        }
+
+        // 重置球位置
+        function resetBall() {
+            ball.x = game.width / 2;
+            ball.y = game.height / 2;
+            ball.dx = (Math.random() > 0.5 ? 1 : -1) * 5;
+            ball.dy = (Math.random() - 0.5) * 5;
+            game.running = false;
+            setTimeout(() => {
+                if (!game.gameOver) {
+                    game.running = true;
+                }
+            }, 1500);
+        }
+
+        // 繪製遊戲場景
+        function draw() {
+            // 清除背景
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, game.width, game.height);
+
+            // 中線
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.setLineDash([10, 10]);
+            ctx.beginPath();
+            ctx.moveTo(game.width / 2, 0);
+            ctx.lineTo(game.width / 2, game.height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // 繪製擋板
+            drawPaddle(player, '#4ade80');
+            drawPaddle(ai, '#f87171');
+
+            // 繪製球
+            drawBall();
+        }
+
+        // 繪製擋板
+        function drawPaddle(paddle, color) {
+            ctx.fillStyle = color;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 10;
+            ctx.fillRect(paddle.x, paddle.y, paddle.width, paddle.height);
+            ctx.shadowBlur = 0;
+        }
+
+        // 繪製球
+        function drawBall() {
+            ctx.fillStyle = '#fbbf24';
+            ctx.shadowColor = '#fbbf24';
+            ctx.shadowBlur = 15;
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        // 遊戲主循環
+        function gameLoop() {
+            if (game.running) {
+                updatePlayer();
+                updateAI();
+                updateBall();
+            }
+
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // 初始化遊戲
+        function init() {
+            updateMessage('按 Space 開始遊戲');
+            updateScore();
+            gameLoop();
+        }
+
+        // 啟動遊戲
+        init();
+    </script>
+</body>
+</html>

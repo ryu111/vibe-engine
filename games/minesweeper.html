@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>掃雷 - Minesweeper</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 800px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .info-bar {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            margin: 20px 0;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .info-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .info-label {
+            font-size: 0.9em;
+            color: #666;
+            font-weight: bold;
+        }
+
+        .info-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #333;
+            font-family: 'Courier New', monospace;
+            min-width: 60px;
+            text-align: center;
+        }
+
+        .smiley-button {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            border: 3px solid #ddd;
+            background: linear-gradient(135deg, #ffd89b 0%, #19547b 100%);
+            font-size: 2.5em;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        }
+
+        .smiley-button:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 14px rgba(0, 0, 0, 0.3);
+        }
+
+        .smiley-button:active {
+            transform: scale(0.95);
+        }
+
+        .difficulty-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+
+        .difficulty-btn {
+            padding: 10px 20px;
+            border: 2px solid #667eea;
+            background: white;
+            color: #667eea;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .difficulty-btn:hover {
+            background: #f0f4ff;
+        }
+
+        .difficulty-btn.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .game-board {
+            display: grid;
+            gap: 2px;
+            background: #ddd;
+            padding: 8px;
+            border-radius: 8px;
+            width: fit-content;
+            margin: 0 auto;
+        }
+
+        .cell {
+            width: 40px;
+            height: 40px;
+            border: 1px solid #999;
+            background: linear-gradient(135deg, #e8e8e8 0%, #d0d0d0 100%);
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+            font-size: 1.1em;
+            user-select: none;
+            transition: all 0.1s;
+            position: relative;
+            font-family: 'Courier New', monospace;
+        }
+
+        .cell:hover:not(.revealed):not(.flagged) {
+            background: linear-gradient(135deg, #f0f0f0 0%, #e0e0e0 100%);
+        }
+
+        .cell.revealed {
+            background: linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 100%);
+            border-color: #999;
+            cursor: default;
+            color: #333;
+        }
+
+        .cell.revealed.empty {
+            background: #f0f0f0;
+            border-color: #aaa;
+        }
+
+        .cell.flagged {
+            background: linear-gradient(135deg, #ffeb3b 0%, #fbc02d 100%);
+            cursor: default;
+        }
+
+        .cell.flagged::before {
+            content: '🚩';
+            font-size: 1.2em;
+        }
+
+        .cell.mine {
+            background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%);
+            color: white;
+        }
+
+        .cell.mine::after {
+            content: '💣';
+            font-size: 1.3em;
+        }
+
+        /* 數字顏色 */
+        .cell.num-1 { color: #0000ff; }
+        .cell.num-2 { color: #008000; }
+        .cell.num-3 { color: #ff0000; }
+        .cell.num-4 { color: #000080; }
+        .cell.num-5 { color: #800000; }
+        .cell.num-6 { color: #008080; }
+        .cell.num-7 { color: #000000; }
+        .cell.num-8 { color: #808080; }
+
+        .game-over {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 1.3em;
+            font-weight: bold;
+        }
+
+        .game-over.lose {
+            color: #c92a2a;
+        }
+
+        .game-over.win {
+            color: #2f9e44;
+        }
+
+        /* 觸控長按視覺反饋 */
+        .cell.long-press {
+            transform: scale(0.95);
+            box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                padding: 15px;
+            }
+
+            .header h1 {
+                font-size: 1.8em;
+            }
+
+            .cell {
+                width: 35px;
+                height: 35px;
+                font-size: 0.9em;
+            }
+
+            .smiley-button {
+                width: 50px;
+                height: 50px;
+                font-size: 2em;
+            }
+
+            .info-value {
+                font-size: 1.5em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⛏️ 掃雷</h1>
+        </div>
+
+        <div class="difficulty-buttons">
+            <button class="difficulty-btn active" data-difficulty="easy">初級 (9x9)</button>
+            <button class="difficulty-btn" data-difficulty="medium">中級 (16x16)</button>
+            <button class="difficulty-btn" data-difficulty="hard">高級 (16x30)</button>
+        </div>
+
+        <div class="info-bar">
+            <div class="info-item">
+                <div class="info-label">剩餘地雷</div>
+                <div class="info-value" id="mines-left">10</div>
+            </div>
+            <button class="smiley-button" id="reset-btn">😊</button>
+            <div class="info-item">
+                <div class="info-label">計時 (秒)</div>
+                <div class="info-value" id="timer">0</div>
+            </div>
+        </div>
+
+        <div class="game-board" id="game-board"></div>
+        <div class="game-over" id="game-status"></div>
+    </div>
+
+    <script>
+        // ============= 配置 =============
+        const DIFFICULTIES = {
+            easy: { rows: 9, cols: 9, mines: 10 },
+            medium: { rows: 16, cols: 16, mines: 40 },
+            hard: { rows: 16, cols: 30, mines: 99 }
+        };
+
+        // ============= 遊戲狀態 =============
+        let gameState = {
+            difficulty: 'easy',
+            rows: 9,
+            cols: 9,
+            mines: 10,
+            board: [],
+            revealed: [],
+            flagged: [],
+            gameOver: false,
+            won: false,
+            timer: 0,
+            timerInterval: null,
+            firstClick: true,
+            longPressTimer: null,
+            cellBeingPressed: null
+        };
+
+        // ============= DOM 元素 =============
+        const gameBoardEl = document.getElementById('game-board');
+        const resetBtn = document.getElementById('reset-btn');
+        const minesLeftEl = document.getElementById('mines-left');
+        const timerEl = document.getElementById('timer');
+        const gameStatusEl = document.getElementById('game-status');
+        const difficultyBtns = document.querySelectorAll('.difficulty-btn');
+
+        // ============= 初始化 =============
+        function initGame() {
+            const config = DIFFICULTIES[gameState.difficulty];
+            gameState.rows = config.rows;
+            gameState.cols = config.cols;
+            gameState.mines = config.mines;
+            gameState.board = [];
+            gameState.revealed = Array(gameState.rows).fill(null).map(() => Array(gameState.cols).fill(false));
+            gameState.flagged = Array(gameState.rows).fill(null).map(() => Array(gameState.cols).fill(false));
+            gameState.gameOver = false;
+            gameState.won = false;
+            gameState.timer = 0;
+            gameState.firstClick = true;
+            gameStatusEl.textContent = '';
+            gameStatusEl.className = 'game-over';
+
+            clearInterval(gameState.timerInterval);
+            updateTimer();
+            updateMinesLeft();
+            renderBoard();
+            updateSmiley();
+        }
+
+        // ============= 生成地雷 =============
+        function generateMines(excludeRow, excludeCol) {
+            gameState.board = Array(gameState.rows).fill(null).map(() => Array(gameState.cols).fill(0));
+            let minesPlaced = 0;
+
+            while (minesPlaced < gameState.mines) {
+                const row = Math.floor(Math.random() * gameState.rows);
+                const col = Math.floor(Math.random() * gameState.cols);
+
+                // 避免第一次點擊位置和重複放置
+                if ((row === excludeRow && col === excludeCol) || gameState.board[row][col] === 'M') {
+                    continue;
+                }
+
+                gameState.board[row][col] = 'M';
+                minesPlaced++;
+            }
+
+            // 計算數字
+            for (let r = 0; r < gameState.rows; r++) {
+                for (let c = 0; c < gameState.cols; c++) {
+                    if (gameState.board[r][c] !== 'M') {
+                        const count = countAdjacentMines(r, c);
+                        gameState.board[r][c] = count;
+                    }
+                }
+            }
+        }
+
+        function countAdjacentMines(row, col) {
+            let count = 0;
+            for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                    const nr = row + dr;
+                    const nc = col + dc;
+                    if (nr >= 0 && nr < gameState.rows && nc >= 0 && nc < gameState.cols) {
+                        if (gameState.board[nr][nc] === 'M') count++;
+                    }
+                }
+            }
+            return count;
+        }
+
+        // ============= 格子操作 =============
+        function revealCell(row, col) {
+            if (gameState.gameOver || gameState.won) return;
+            if (gameState.revealed[row][col] || gameState.flagged[row][col]) return;
+
+            // 第一次點擊，生成地雷
+            if (gameState.firstClick) {
+                generateMines(row, col);
+                gameState.firstClick = false;
+                startTimer();
+            }
+
+            if (gameState.board[row][col] === 'M') {
+                // 踩到地雷
+                revealAllMines();
+                gameState.gameOver = true;
+                gameStatusEl.textContent = '💥 遊戲失敗！';
+                gameStatusEl.className = 'game-over lose';
+                clearInterval(gameState.timerInterval);
+                updateSmiley();
+                return;
+            }
+
+            // 展開格子
+            revealRecursive(row, col);
+            updateMinesLeft();
+            checkWin();
+        }
+
+        function revealRecursive(row, col) {
+            if (row < 0 || row >= gameState.rows || col < 0 || col >= gameState.cols) return;
+            if (gameState.revealed[row][col] || gameState.flagged[row][col]) return;
+
+            gameState.revealed[row][col] = true;
+
+            // 如果是空格，遞迴展開周圍
+            if (gameState.board[row][col] === 0) {
+                for (let dr = -1; dr <= 1; dr++) {
+                    for (let dc = -1; dc <= 1; dc++) {
+                        revealRecursive(row + dr, col + dc);
+                    }
+                }
+            }
+        }
+
+        function toggleFlag(row, col, e) {
+            e.preventDefault();
+            if (gameState.gameOver || gameState.won) return;
+            if (gameState.revealed[row][col]) return;
+
+            gameState.flagged[row][col] = !gameState.flagged[row][col];
+            updateMinesLeft();
+            render();
+        }
+
+        // ============= 觸控長按 =============
+        function startLongPress(row, col, e) {
+            gameState.cellBeingPressed = { row, col };
+            gameState.longPressTimer = setTimeout(() => {
+                const cell = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+                if (cell) cell.classList.add('long-press');
+            }, 300);
+        }
+
+        function endLongPress(row, col, e) {
+            if (gameState.longPressTimer) {
+                clearTimeout(gameState.longPressTimer);
+                gameState.longPressTimer = null;
+            }
+
+            const cell = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+            if (cell) cell.classList.remove('long-press');
+
+            // 如果長按時間足夠，觸發插旗
+            if (gameState.cellBeingPressed && gameState.cellBeingPressed.row === row && gameState.cellBeingPressed.col === col) {
+                const timeSinceStart = Date.now() - e.timeStamp;
+                if (timeSinceStart > 300) {
+                    toggleFlag(row, col, e);
+                }
+            }
+            gameState.cellBeingPressed = null;
+        }
+
+        // ============= 檢查勝利 =============
+        function checkWin() {
+            let revealedCount = 0;
+            for (let r = 0; r < gameState.rows; r++) {
+                for (let c = 0; c < gameState.cols; c++) {
+                    if (gameState.revealed[r][c]) revealedCount++;
+                }
+            }
+
+            const totalNonMine = gameState.rows * gameState.cols - gameState.mines;
+            if (revealedCount === totalNonMine) {
+                gameState.won = true;
+                gameStatusEl.textContent = '🎉 勝利！';
+                gameStatusEl.className = 'game-over win';
+                clearInterval(gameState.timerInterval);
+                updateSmiley();
+            }
+        }
+
+        function revealAllMines() {
+            for (let r = 0; r < gameState.rows; r++) {
+                for (let c = 0; c < gameState.cols; c++) {
+                    if (gameState.board[r][c] === 'M') {
+                        gameState.revealed[r][c] = true;
+                    }
+                }
+            }
+        }
+
+        // ============= 時間和地雷計數 =============
+        function startTimer() {
+            gameState.timerInterval = setInterval(() => {
+                gameState.timer++;
+                updateTimer();
+            }, 1000);
+        }
+
+        function updateTimer() {
+            timerEl.textContent = gameState.timer;
+        }
+
+        function updateMinesLeft() {
+            const flagCount = gameState.flagged.flat().filter(f => f).length;
+            const left = Math.max(0, gameState.mines - flagCount);
+            minesLeftEl.textContent = left;
+        }
+
+        function updateSmiley() {
+            if (gameState.gameOver) {
+                resetBtn.textContent = '😵';
+            } else if (gameState.won) {
+                resetBtn.textContent = '😎';
+            } else {
+                resetBtn.textContent = '😊';
+            }
+        }
+
+        // ============= 渲染 =============
+        function renderBoard() {
+            gameBoardEl.innerHTML = '';
+            gameBoardEl.style.gridTemplateColumns = `repeat(${gameState.cols}, 1fr)`;
+
+            for (let r = 0; r < gameState.rows; r++) {
+                for (let c = 0; c < gameState.cols; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.setAttribute('data-row', r);
+                    cell.setAttribute('data-col', c);
+
+                    if (gameState.flagged[r][c]) {
+                        cell.classList.add('flagged');
+                    } else if (gameState.revealed[r][c]) {
+                        cell.classList.add('revealed');
+                        if (gameState.board[r][c] === 'M') {
+                            cell.classList.add('mine');
+                        } else if (gameState.board[r][c] === 0) {
+                            cell.classList.add('empty');
+                        } else {
+                            cell.classList.add(`num-${gameState.board[r][c]}`);
+                            cell.textContent = gameState.board[r][c];
+                        }
+                    }
+
+                    // 左鍵點擊翻開
+                    cell.addEventListener('click', (e) => {
+                        revealCell(r, c);
+                    });
+
+                    // 右鍵插旗
+                    cell.addEventListener('contextmenu', (e) => {
+                        toggleFlag(r, c, e);
+                    });
+
+                    // 觸控長按支援
+                    cell.addEventListener('touchstart', (e) => {
+                        startLongPress(r, c, e);
+                    });
+
+                    cell.addEventListener('touchend', (e) => {
+                        endLongPress(r, c, e);
+                    });
+
+                    gameBoardEl.appendChild(cell);
+                }
+            }
+        }
+
+        function render() {
+            renderBoard();
+        }
+
+        // ============= 事件監聽 =============
+        resetBtn.addEventListener('click', () => {
+            initGame();
+        });
+
+        difficultyBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                difficultyBtns.forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                gameState.difficulty = e.target.getAttribute('data-difficulty');
+                initGame();
+            });
+        });
+
+        // ============= 啟動 =============
+        initGame();
+    </script>
+</body>
+</html>
