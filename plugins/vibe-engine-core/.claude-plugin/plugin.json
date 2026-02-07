@@ -1,6 +1,6 @@
 {
   "name": "vibe-engine-core",
-  "version": "0.6.16",
+  "version": "0.6.17",
   "description": "Vibe Engine 核心模組 - 多代理協調、任務分解、驗證協議",
   "author": {
     "name": "Vibe Engine Team"

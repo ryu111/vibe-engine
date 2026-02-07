@@ -602,6 +602,16 @@ async function main() {
 
   // 檢查是否應該直接回答
   if (shouldDirectResponse(userPrompt, classification)) {
+    // ★ 清理舊路由計劃，防止殘留狀態造成死結
+    try {
+      const routingManager = new RoutingStateManager(PROJECT_ROOT);
+      if (routingManager.hasActivePlan()) {
+        routingManager.markPlanCompleted();
+        deactivateRalphLoop();
+      }
+    } catch (e) {
+      // fail-safe: 清理失敗不影響正常流程
+    }
     console.log(JSON.stringify({
       continue: true,
       suppressOutput: true

@@ -632,6 +632,12 @@ async function main() {
       return;
     }
 
+    // ★ simple 分類不需分解 — 防止不必要的 routing plan 產生
+    if (classificationResult && classificationResult.complexity === 'simple') {
+      writeHookOutput({ continue: true, suppressOutput: true });
+      return;
+    }
+
     // 執行分解
     const decomposition = decomposeTask(prompt, classificationResult);
 

@@ -232,10 +232,21 @@ const STRUCTURAL_FEATURES = {
     {
       name: 'conversational_acknowledgment',
       test: (prompt, metrics, _sanitized) => {
-        const ACK_RE = /^(?:好|好了|好的|OK|ok|行|可以|收到|了解|知道了|知道|嗯|對|是的|沒問題|沒事|謝謝|感謝|thank|yes|no|不|不要|不用|算了|等等|停|sure|got it)/iu;
+        const ACK_RE = /^(?:好|好了|好的|OK|ok|ok了|行|可以|收到|了解|知道了|知道|嗯|對|是的|沒問題|沒事|謝謝|感謝|thank|yes|no|不|不要|不用|算了|等等|停|sure|got it|繼續|continue|清除|取消|cancel|下一步|next|done|結束)/iu;
         return ACK_RE.test(prompt.trim()) && metrics.wordCount <= 30;
       },
       confidence: 0.9
+    },
+    {
+      name: 'git_command',
+      test: (prompt, metrics, _sanitized) => {
+        const GIT_RE = /^(?:commit|push|pull|merge|rebase|stash|cherry-?pick|tag|checkout|branch|log|diff|status|fetch|clone|reset|revert)\b/i;
+        const GIT_PREFIX_RE = /^git\s+\w/i;
+        const COMMIT_PUSH_RE = /^commit\s*(?:push|&&\s*push)?$/i;
+        return (GIT_RE.test(prompt.trim()) || GIT_PREFIX_RE.test(prompt.trim()) || COMMIT_PUSH_RE.test(prompt.trim()))
+               && metrics.wordCount <= 10;
+      },
+      confidence: 0.95
     },
     {
       name: 'no_action_no_product',

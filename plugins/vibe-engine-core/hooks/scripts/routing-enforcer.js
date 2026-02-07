@@ -70,7 +70,7 @@ function checkAutoFixMode() {
  * 防禦縱深：即使 agent-router 失敗，仍能攔截複雜任務
  * @returns {object|null} { suggestedAgent, complexity }
  */
-const CLASSIFICATION_TTL = 30000; // 30 秒
+const CLASSIFICATION_TTL = 10000; // 10 秒（從 30s 縮短，防止跨 turn 誤殺）
 function checkClassificationFallback() {
   const paths = getVibeEnginePaths();
   const classification = safeReadJSON(path.join(paths.root, 'last-classification.json'), null);
