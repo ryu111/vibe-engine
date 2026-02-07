@@ -365,6 +365,66 @@ class RoutingStateManager {
   }
 
   /**
+   * 檢查計劃中是否包含 reviewer 任務
+   * @returns {boolean}
+   */
+  hasReviewerTasks() {
+    const state = this.load();
+    if (!state) return false;
+
+    for (const phase of state.phases) {
+      for (const task of phase.tasks || []) {
+        if (task.agent === 'reviewer') return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * 新增修復任務到當前計劃
+   * @param {string} agentName - agent 名稱
+   * @param {string} description - 任務描述
+   * @returns {object|null} 新增的任務
+   */
+  addFixTask(agentName, description) {
+    const state = this.load();
+    if (!state) return null;
+
+    const taskId = generateId('fix');
+    const newTask = {
+      id: taskId,
+      agent: agentName,
+      description,
+      model: agentName === 'architect' ? 'opus' : 'sonnet',
+      status: 'pending',
+      startedAt: null,
+      completedAt: null,
+      error: null,
+      isFixTask: true
+    };
+
+    // 新增一個修復 phase
+    const newPhase = {
+      phase: state.phases.length + 1,
+      parallel: false,
+      tasks: [newTask]
+    };
+
+    state.phases.push(newPhase);
+    state.totalCount++;
+    state.taskIndex[taskId] = {
+      phaseIndex: state.phases.length - 1,
+      taskIndex: 0
+    };
+
+    // 重新設為 in_progress
+    state.status = 'in_progress';
+
+    this.save(state);
+    return newTask;
+  }
+
+  /**
    * 獲取執行摘要
    * @returns {object}
    */

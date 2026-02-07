@@ -99,6 +99,84 @@ function areAllTasksDone(state) {
 }
 
 // ============================================================
+// 進度展示
+// ============================================================
+
+const AGENT_EMOJI = {
+  architect: '🏗️',
+  developer: '👨‍💻',
+  tester: '🧪',
+  reviewer: '👀',
+  explorer: '🔍'
+};
+
+/**
+ * 生成進度展示
+ * @param {object} state - routing state
+ * @returns {string} 進度條和任務狀態
+ */
+function generateProgressDisplay(state) {
+  if (!state || !state.phases) return '';
+
+  const total = state.totalCount || 0;
+  const completed = state.completedCount || 0;
+  const failed = state.failedCount || 0;
+
+  // 進度條
+  const progress = total > 0 ? Math.floor((completed / total) * 10) : 0;
+  let bar = '[';
+  for (let i = 0; i < 10; i++) {
+    bar += i < progress ? '█' : '░';
+  }
+  bar += `] ${completed}/${total}`;
+  if (failed > 0) bar += ` (${failed} failed)`;
+
+  const lines = [bar, ''];
+
+  // 任務狀態列表
+  for (const phase of state.phases) {
+    for (const task of phase.tasks || []) {
+      const emoji = task.status === 'completed' ? '✅' :
+                    task.status === 'failed' ? '❌' :
+                    task.status === 'executing' ? '🔄' : '⏳';
+      const agentEmoji = AGENT_EMOJI[task.agent] || '🤖';
+      const desc = (task.description || '').slice(0, 40);
+      lines.push(`${emoji} ${agentEmoji} ${task.agent} — ${desc}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * 讀取 ralph-wiggum loop 狀態
+ * @returns {object|null} { iteration, maxIterations } 或 null
+ */
+function readRalphLoopState() {
+  try {
+    const projectRoot = getProjectRoot();
+    const stateFile = require('path').join(projectRoot, '.claude', 'ralph-loop.local.md');
+    if (!require('fs').existsSync(stateFile)) return null;
+
+    const content = require('fs').readFileSync(stateFile, 'utf8');
+    // 解析 YAML frontmatter
+    const match = content.match(/^---\n([\s\S]*?)\n---/);
+    if (!match) return null;
+
+    const frontmatter = match[1];
+    const iteration = (frontmatter.match(/iteration:\s*(\d+)/) || [])[1];
+    const maxIterations = (frontmatter.match(/max_iterations:\s*(\d+)/) || [])[1];
+
+    return {
+      iteration: parseInt(iteration, 10) || 0,
+      maxIterations: parseInt(maxIterations, 10) || 0
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================
 // 核心追蹤邏輯
 // ============================================================
 
@@ -186,13 +264,28 @@ async function main() {
     const result = trackTaskCompletion(hookInput);
 
     if (result) {
-      // 追蹤成功，提供進度反饋
+      const projectRoot = getProjectRoot();
+      const routingManager = new RoutingStateManager(projectRoot);
+      const updatedState = routingManager.load();
+
+      // 生成進度展示
+      const progressDisplay = generateProgressDisplay(updatedState);
+
+      // 讀取 ralph loop 狀態
+      const ralphState = readRalphLoopState();
+      const ralphPrefix = ralphState
+        ? `🔄 Ralph Loop (iteration ${ralphState.iteration}/${ralphState.maxIterations || '∞'})\n\n`
+        : '';
+
       let context;
       if (result.allDone) {
-        context = `[Routing Progress] Task ${result.taskId} marked as ${result.status}. All tasks completed. Routing plan finished.`;
+        context = `${ralphPrefix}[Routing Progress] All tasks completed.\n\n${progressDisplay}\n\nOutput <promise>ROUTING_COMPLETE</promise> to finish.`;
       } else {
-        context = `[Routing Progress] Task ${result.taskId} marked as ${result.status}.`;
+        context = `${ralphPrefix}[Routing Progress] Task ${result.taskId} (${result.status}).\n\n${progressDisplay}`;
       }
+
+      // 向用戶展示進度（MUST display）
+      context += '\n\n**MUST**: 向用戶展示以上進度更新。';
 
       writeHookOutput(buildSuccessOutput({
         systemMessage: context,
@@ -220,7 +313,9 @@ module.exports = {
   parseAgentType,
   findMatchingTask,
   areAllTasksDone,
-  trackTaskCompletion
+  trackTaskCompletion,
+  generateProgressDisplay,
+  readRalphLoopState
 };
 
 if (require.main === module) {

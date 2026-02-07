@@ -554,9 +554,9 @@ async function testAutoRoutingExecution() {
   const directive = generateRoutingDirective(plan, planId, userPrompt);
 
   assert(
-    directive && directive.includes('MANDATORY'),
-    'F2.1 指令包含 MANDATORY 標記',
-    `有 MANDATORY: ${directive?.includes('MANDATORY')}`
+    directive && (directive.includes('MANDATORY') || directive.includes('RALPH LOOP') || directive.includes('強制執行')),
+    'F2.1 指令包含強制執行標記（MANDATORY/RALPH LOOP）',
+    `有強制標記: ${directive?.includes('MANDATORY') || directive?.includes('RALPH LOOP') || directive?.includes('強制執行')}`
   );
 
   assert(
@@ -1033,14 +1033,14 @@ async function testHookChainPipeline() {
     );
 
     assert(
-      step3.systemMessage && step3.systemMessage.includes('MANDATORY'),
-      'H3.2 systemMessage 包含 MANDATORY 強制指令',
-      `has MANDATORY: ${step3?.systemMessage?.includes('MANDATORY')}`
+      step3.systemMessage && (step3.systemMessage.includes('MANDATORY') || step3.systemMessage.includes('RALPH LOOP') || step3.systemMessage.includes('強制執行')),
+      'H3.2 systemMessage 包含強制執行指令',
+      `has 強制標記: ${step3?.systemMessage?.includes('MANDATORY') || step3?.systemMessage?.includes('RALPH LOOP')}`
     );
 
     assert(
-      step3.systemMessage && step3.systemMessage.includes('MANDATORY'),
-      'H3.3 systemMessage 包含 MANDATORY 路由指令',
+      step3.systemMessage && (step3.systemMessage.includes('MANDATORY') || step3.systemMessage.includes('RALPH LOOP') || step3.systemMessage.includes('強制執行')),
+      'H3.3 systemMessage 包含路由指令',
       `has plan: ${step3?.systemMessage?.includes('Plan')}`
     );
 
@@ -2032,9 +2032,9 @@ async function testCrossChainState() {
     );
 
     assert(
-      step3?.systemMessage && step3.systemMessage.includes('MANDATORY'),
-      'P3 agent-router 生成 MANDATORY 指令',
-      `has MANDATORY: ${step3?.systemMessage?.includes('MANDATORY')}`
+      step3?.systemMessage && (step3.systemMessage.includes('MANDATORY') || step3.systemMessage.includes('RALPH LOOP') || step3.systemMessage.includes('強制執行')),
+      'P3 agent-router 生成強制執行指令',
+      `has 強制標記: ${step3?.systemMessage?.includes('MANDATORY') || step3?.systemMessage?.includes('RALPH LOOP')}`
     );
 
     // ── P4-P5: 活躍 routing → Stop hooks defer/fast-path ──
@@ -2360,9 +2360,9 @@ async function testFullLifecycle() {
       user_prompt: prompt
     }, hookEnv);
     assert(
-      s3?.systemMessage && s3.systemMessage.includes('MANDATORY'),
-      'R3 agent-router → MANDATORY 指令',
-      `has MANDATORY: ${s3?.systemMessage?.includes('MANDATORY')}`
+      s3?.systemMessage && (s3.systemMessage.includes('MANDATORY') || s3.systemMessage.includes('RALPH LOOP') || s3.systemMessage.includes('強制執行')),
+      'R3 agent-router → 強制執行指令',
+      `has 強制標記: ${s3?.systemMessage?.includes('MANDATORY') || s3?.systemMessage?.includes('RALPH LOOP')}`
     );
 
     // ── R4-R5: 模擬 PostToolUse 觀察收集 ──
@@ -2577,9 +2577,9 @@ async function testPipelineContract() {
     }, hookEnv);
 
     assert(
-      s3 && s3.systemMessage && s3.systemMessage.includes('MANDATORY'),
-      'S3.1 systemMessage 包含 MANDATORY 指令',
-      `has MANDATORY: ${s3?.systemMessage?.includes('MANDATORY')}`
+      s3 && s3.systemMessage && (s3.systemMessage.includes('MANDATORY') || s3.systemMessage.includes('RALPH LOOP') || s3.systemMessage.includes('強制執行')),
+      'S3.1 systemMessage 包含強制執行指令',
+      `has 強制標記: ${s3?.systemMessage?.includes('MANDATORY') || s3?.systemMessage?.includes('RALPH LOOP')}`
     );
 
     assert(
@@ -2590,8 +2590,8 @@ async function testPipelineContract() {
 
     assert(
       s3 && s3.hookSpecificOutput && s3.hookSpecificOutput.additionalContext &&
-      s3.hookSpecificOutput.additionalContext.includes('MANDATORY'),
-      'S3.3 hookSpecificOutput.additionalContext 包含 MANDATORY 指令（雙通道）',
+      (s3.hookSpecificOutput.additionalContext.includes('MANDATORY') || s3.hookSpecificOutput.additionalContext.includes('RALPH LOOP') || s3.hookSpecificOutput.additionalContext.includes('強制執行')),
+      'S3.3 hookSpecificOutput.additionalContext 包含強制執行指令（雙通道）',
       `has additionalContext: ${!!s3?.hookSpecificOutput?.additionalContext}`
     );
 
@@ -2618,21 +2618,21 @@ async function testPipelineContract() {
     }, hookEnv);
 
     assert(
-      s4 && s4.continue === false,
-      'S4.1 有 pending tasks 時 continue === false（阻擋停止）',
+      s4 && s4.continue === true,
+      'S4.1 有 pending tasks 時 continue === true（資訊性，實際阻擋由 ralph-wiggum 負責）',
       `continue: ${s4?.continue}`
     );
 
     assert(
-      s4 && s4.systemMessage && s4.systemMessage.includes('ROUTING INCOMPLETE'),
-      'S4.2 阻擋訊息包含 ROUTING INCOMPLETE',
-      `has ROUTING INCOMPLETE: ${s4?.systemMessage?.includes('ROUTING INCOMPLETE')}`
+      s4 && s4.systemMessage && (s4.systemMessage.includes('Ralph') || s4.systemMessage.includes('remaining') || s4.systemMessage.includes('tasks')),
+      'S4.2 資訊訊息包含進度資訊（Ralph/remaining/tasks）',
+      `has progress info: ${s4?.systemMessage?.includes('Ralph') || s4?.systemMessage?.includes('remaining')}`
     );
 
     assert(
-      s4 && s4.systemMessage && s4.systemMessage.includes('必須繼續執行'),
-      'S4.3 阻擋訊息包含中文指示',
-      `has 必須繼續: ${s4?.systemMessage?.includes('必須繼續執行')}`
+      s4 && s4.systemMessage && s4.systemMessage.length > 0,
+      'S4.3 提供資訊性訊息',
+      `has message: ${!!s4?.systemMessage}`
     );
 
     // ── S5: 完整鏈路端到端 — 乾淨狀態重跑 ──
@@ -2676,9 +2676,9 @@ async function testPipelineContract() {
     // Step 3: router
     const chain3 = runHookScript('agent-router.js', chainInput, cleanEnv);
     assert(
-      chain3 && chain3.systemMessage && chain3.systemMessage.includes('MANDATORY'),
-      'S5.4 鏈路 Step3: 產出 MANDATORY 路由指令',
-      `has MANDATORY: ${chain3?.systemMessage?.includes('MANDATORY')}`
+      chain3 && chain3.systemMessage && (chain3.systemMessage.includes('MANDATORY') || chain3.systemMessage.includes('RALPH LOOP') || chain3.systemMessage.includes('強制執行')),
+      'S5.4 鏈路 Step3: 產出強制執行路由指令',
+      `has 強制標記: ${chain3?.systemMessage?.includes('MANDATORY') || chain3?.systemMessage?.includes('RALPH LOOP')}`
     );
 
     // 驗證路由狀態檔已建立
@@ -2688,14 +2688,14 @@ async function testPipelineContract() {
       `exists: ${fs.existsSync(path.join(cleanVibe, 'routing-state.json'))}`
     );
 
-    // Step 4: Stop hook 阻擋
+    // Step 4: Stop hook 提供資訊（實際阻擋由 ralph-wiggum 負責）
     const chain4 = runHookScript('routing-completion-validator.js', {
       transcript_summary: '我先設計了架構', reason: 'stop', cwd: cleanDir
     }, cleanEnv);
     assert(
-      chain4 && chain4.continue === false,
-      'S5.6 鏈路 Step4: Stop hook 阻擋成功',
-      `continue: ${chain4?.continue}`
+      chain4 && chain4.continue === true && chain4.systemMessage && chain4.systemMessage.includes('Ralph'),
+      'S5.6 鏈路 Step4: Stop hook 提供 ralph loop 資訊',
+      `continue: ${chain4?.continue}, has Ralph info: ${chain4?.systemMessage?.includes('Ralph')}`
     );
 
     // 清理

@@ -126,7 +126,11 @@ function generateFailureReport(pendingTasks, planId, retryInfo) {
 }
 
 /**
- * 主流程
+ * 主流程 — 簡化版
+ * ralph-wiggum 的 Stop hook 負責阻止 Claude 停止
+ * 此 hook 只負責：
+ * 1. 檢查 routing state 並提供資訊
+ * 2. 在所有任務完成時清理 routing state
  */
 async function main() {
   const { hookInput, isHook } = await readHookInput();
@@ -144,9 +148,8 @@ async function main() {
   const cwd = hookInput.cwd || process.cwd();
   const routingManager = new RoutingStateManager(cwd);
 
-  // 檢查是否有活躍的路由計劃
+  // 沒有活躍計劃 → 放行
   if (!routingManager.hasActivePlan()) {
-    // 沒有活躍計劃，正常繼續
     writeHookOutput(buildSuccessOutput({
       suppressOutput: true
     }));
@@ -155,56 +158,30 @@ async function main() {
 
   const state = routingManager.load();
   const planId = state.planId;
+  const summary = routingManager.getSummary();
 
-  // 檢查是否有完成標記
-  const transcriptSummary = hookInput.transcript_summary || hookInput.reason || '';
-  if (hasCompletionMarker(transcriptSummary, planId)) {
-    // 標記計劃完成
-    routingManager.markPlanCompleted();
-    writeHookOutput(buildSuccessOutput({
-      suppressOutput: false,
-      systemMessage: `✅ Routing plan ${planId} completed successfully.`
-    }));
-    return;
-  }
-
-  // 獲取未完成任務
+  // 檢查未完成任務
   const pendingTasks = routingManager.getPendingTasks();
 
   if (pendingTasks.length === 0) {
-    // 所有任務都已完成（但沒有完成標記）
+    // 所有任務完成 — 清理 routing state
     routingManager.markPlanCompleted();
     writeHookOutput(buildSuccessOutput({
       suppressOutput: false,
-      systemMessage: `✅ All routing tasks completed for plan ${planId}.`
+      systemMessage: `✅ Routing plan ${planId} completed. ${summary.completedCount}/${summary.totalCount} tasks done. Output <promise>ROUTING_COMPLETE</promise> to finish.`
     }));
     return;
   }
 
-  // 有未完成任務 - 增加重試計數
-  const retryInfo = routingManager.incrementRetry();
+  // 有未完成任務 — 提供資訊（ralph-wiggum 負責阻擋停止）
+  const taskList = pendingTasks.slice(0, 5).map((t, i) =>
+    `${i + 1}. [${t.agent}] ${t.description}`
+  ).join('\n');
 
-  if (!retryInfo.canRetry) {
-    // 超過最大重試次數
-    routingManager.markPlanFailed('Max retries exceeded');
-    const failureReport = generateFailureReport(pendingTasks, planId, retryInfo);
-
-    writeHookOutput({
-      continue: true,
-      suppressOutput: false,
-      systemMessage: failureReport
-    });
-    return;
-  }
-
-  // 生成強制繼續指令 — 用 continue: false 實際阻擋 Claude 停止
-  const continueDirective = generateContinueDirective(pendingTasks, planId, retryInfo);
-
-  writeHookOutput({
-    continue: false,
+  writeHookOutput(buildSuccessOutput({
     suppressOutput: false,
-    systemMessage: continueDirective
-  });
+    systemMessage: `🔄 [Routing] ${pendingTasks.length} tasks remaining (${summary.completedCount}/${summary.totalCount} done). Ralph loop will continue.\n\n${taskList}`
+  }));
 }
 
 // 導出供測試

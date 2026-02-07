@@ -1,6 +1,6 @@
 {
   "name": "vibe-engine-guarantee",
-  "version": "0.6.15",
+  "version": "0.6.16",
   "description": "Vibe Engine 保障模組 - 錯誤恢復、自動修復循環、健康檢查、熔斷器",
   "author": {
     "name": "Vibe Engine Team"

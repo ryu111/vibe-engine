@@ -417,6 +417,61 @@ function generateRoutingInstructions(plan, originalRequest) {
 }
 
 // ============================================================
+// Ralph Loop 整合
+// ============================================================
+
+/**
+ * 啟動 ralph-wiggum loop
+ * 寫入 .claude/ralph-loop.local.md state file
+ * ralph-wiggum 的 Stop hook 會讀取此檔案並阻止 Claude 停止
+ * @param {string} directive - 路由指令（作為 ralph prompt）
+ * @param {string} planId - 路由計劃 ID
+ */
+function activateRalphLoop(directive, planId) {
+  try {
+    const claudeDir = path.join(PROJECT_ROOT, '.claude');
+    if (!fs.existsSync(claudeDir)) {
+      fs.mkdirSync(claudeDir, { recursive: true });
+    }
+
+    const stateFile = path.join(claudeDir, 'ralph-loop.local.md');
+    const now = new Date().toISOString();
+
+    const content = [
+      '---',
+      'active: true',
+      'iteration: 1',
+      'max_iterations: 30',
+      `completion_promise: "ROUTING_COMPLETE"`,
+      `started_at: "${now}"`,
+      '---',
+      '',
+      directive
+    ].join('\n');
+
+    fs.writeFileSync(stateFile, content, 'utf8');
+  } catch (err) {
+    // fail-safe：ralph loop 啟動失敗不應阻擋路由
+    console.error(`[Agent Router] Failed to activate ralph loop: ${err.message}`);
+  }
+}
+
+/**
+ * 停用 ralph-wiggum loop
+ * 刪除 .claude/ralph-loop.local.md
+ */
+function deactivateRalphLoop() {
+  try {
+    const stateFile = path.join(PROJECT_ROOT, '.claude', 'ralph-loop.local.md');
+    if (fs.existsSync(stateFile)) {
+      fs.unlinkSync(stateFile);
+    }
+  } catch (err) {
+    // fail-safe
+  }
+}
+
+// ============================================================
 // 強制執行指令生成器（新版 - 自動路由）
 // ============================================================
 
@@ -432,13 +487,15 @@ function generateRoutingDirective(plan, planId, originalRequest) {
   const lines = [
     '',
     '╔══════════════════════════════════════════════════════════════════╗',
-    '║  ⚠️  MANDATORY EXECUTION DIRECTIVE - 強制執行指令                 ║',
+    '║  🔄 RALPH LOOP ACTIVE — 自動持續執行直到完成                      ║',
     '╠══════════════════════════════════════════════════════════════════╣',
     `║  Plan ID: ${planId.padEnd(53)}║`,
     `║  Strategy: ${plan.strategy.padEnd(52)}║`,
     `║  Total Tasks: ${String(plan.phases.reduce((s, p) => s + p.tasks.length, 0)).padEnd(49)}║`,
+    '║  Loop: Ralph Wiggum (max 30 iterations)                        ║',
     '╠══════════════════════════════════════════════════════════════════╣',
-    '║  此路由計劃為【強制執行】，不可跳過或自行決定。                   ║',
+    '║  此路由計劃為【強制執行】，Stop hook 保證持續執行。               ║',
+    '║  完成信號: <promise>ROUTING_COMPLETE</promise>                   ║',
     '╚══════════════════════════════════════════════════════════════════╝',
     ''
   ];
@@ -488,9 +545,16 @@ function generateRoutingDirective(plan, planId, originalRequest) {
   lines.push('1. **必須**按 Phase 順序執行，同一 Phase 可並行');
   lines.push('2. **每個 MUST 項目都必須執行**，不可跳過任何一個');
   lines.push('3. 如遇到錯誤，報告錯誤但**繼續執行**其他任務');
-  lines.push(`4. 完成所有任務後，在回覆末尾標記: \`[Routing Complete: ${planId}]\``);
+  lines.push('4. **Review-Fix 循環**（如果計劃包含 reviewer）：');
+  lines.push('   - Reviewer 完成後，**立即分析結果**');
+  lines.push('   - 如果有 REQUEST_CHANGES 或 PASS_WITH_ISSUES 需修復 → 委派 developer 修復 → 修復後重新 review');
+  lines.push('   - 如果全部 PASS/APPROVED → 繼續');
+  lines.push('   - **禁止中斷**：不得停下來詢問用戶「要修嗎？」— 直接修復');
+  lines.push('5. **進度展示**：每個 agent 完成後，向用戶展示進度更新');
+  lines.push('6. 🔄 **Ralph Loop 保證**：Stop hook 會阻止你停止直到任務完成');
+  lines.push(`7. 所有任務完成且 review 通過後，輸出: \`<promise>ROUTING_COMPLETE</promise>\``);
   lines.push('');
-  lines.push('⛔ **違反此指令將導致任務被判定為未完成，Stop hook 會強制要求繼續執行**');
+  lines.push('⛔ **不要輸出 [Routing Complete: ...] — 改用 <promise>ROUTING_COMPLETE</promise>**');
   lines.push('');
 
   return lines.join('\n');
@@ -593,6 +657,9 @@ async function main() {
   // 生成強制執行指令（新版）
   const directive = generateRoutingDirective(plan, planId, userPrompt);
 
+  // ★ 啟動 ralph-wiggum loop — 保證工作流不中斷
+  activateRalphLoop(directive, planId);
+
   // 同時使用 systemMessage 和 hookSpecificOutput.additionalContext 確保指令傳達
   console.log(JSON.stringify({
     continue: true,
@@ -613,7 +680,9 @@ module.exports = {
   selectAgent,
   generateRoutingPlan,
   generateRoutingInstructions,
-  generateRoutingDirective  // 新增
+  generateRoutingDirective,
+  activateRalphLoop,
+  deactivateRalphLoop
 };
 
 // 執行
